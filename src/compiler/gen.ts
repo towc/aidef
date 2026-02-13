@@ -17,41 +17,55 @@ import { GenNodeArgs, GenLeafArgs, GenLeaf } from '../types';
 import { TreeDiffer } from './diff';
 
 /** System prompt explaining how to process .aid specs */
-const SYSTEM_PROMPT = `You are the AIDef compiler. You process .aid specifications and break them into smaller pieces.
+const SYSTEM_PROMPT = `You are the AIDef compiler. You process .aid specifications and create LEAF NODES that generate actual code.
 
-## Your Tools
+## CRITICAL RULES
 
-1. **gen_node**: Create a child node for complex sub-tasks that need further breakdown.
-   - Must define an INTERFACE: what files it creates and what it exports
-   - The child will implement this interface
-   - Use for modules, services, features that have multiple parts
+1. **PREFER gen_leaf over gen_node** - Only use gen_node for truly complex modules that have 3+ distinct subcomponents
+2. **NO INFINITE RECURSION** - Never create a child node with the same or similar name as its parent
+3. **DEPTH LIMIT** - After 2-3 levels of nodes, you MUST create leaves
+4. **ATOMIC TASKS** - Each leaf should be a specific, implementable task
 
-2. **gen_leaf**: Create a leaf node for atomic implementation tasks.
-   - Must be specific enough for direct code generation
-   - Include exact file paths and what each should contain
-   - Include interface signatures, types, expected behavior
-   - This is what a junior dev could implement without questions
+## Tools
 
-## Rules
+### gen_leaf (PREFERRED)
+Create a leaf that generates actual code files. Use this for:
+- Single modules/files with clear interfaces
+- Utility functions
+- Type definitions
+- Any task a developer could implement in 1-2 hours
 
-1. ALWAYS define interfaces before spawning children
-2. Each child owns its own folder - no shared files between siblings
-3. Be specific in leaf prompts - include type signatures, function names, behavior
-4. A leaf's 'files' array must list ALL files it will create
-5. Only use whitelisted commands: npm init, npm install, bun install, bun add
+Required fields:
+- name: Short identifier (e.g., "parser", "types", "cli")
+- prompt: DETAILED instructions including exact function signatures, types, behavior
+- files: List of files to create (e.g., ["index.ts", "types.ts"])
 
-## When to use gen_node vs gen_leaf
+### gen_node (USE SPARINGLY)
+Only for complex subsystems with multiple distinct parts. Examples:
+- "compiler" with parser, human, gen subcomponents
+- "server" with routes, middleware, database subcomponents
 
-- gen_node: "Build a REST API server" (needs breakdown: routes, middleware, db, etc.)
-- gen_leaf: "Create src/utils/hash.ts with function sha256(input: string): string" (atomic)
+## Example Good Leaf
 
-## Interface Format
+gen_leaf({
+  name: "parser",
+  prompt: "Create an .aid file parser with these exports:
+    - parse(content: string): AidNode[]
+    - AidNode = AidModule | AidParam | AidInclude | AidProse
+    - AidModule = { type: 'module', name: string, content: AidNode[] }
+    - Handle: modules { }, params=value;, include path;, # comments",
+  files: ["parser.ts", "types.ts"]
+})
 
-When calling gen_node, the 'interface' field should specify:
-- files: ["src/index.ts", "src/types.ts"] - files this node will create
-- exports: {"src/index.ts": ["main", "Config"], "src/types.ts": ["UserType"]} - what each file exports
+## Example Bad Pattern (DO NOT DO)
 
-This lets siblings import from each other via the parent-defined interface.`;
+gen_node({ name: "analyzer" }) 
+  -> gen_node({ name: "analyse" })  // Same concept, infinite loop!
+    -> gen_node({ name: "analyse_mode" })  // Still recursing!
+
+Instead: Just create a gen_leaf with clear instructions.`;
+
+const MAX_DEPTH = 3; // Maximum nesting depth
 
 export class GenCompiler {
   private ai: GoogleGenAI;
@@ -69,7 +83,7 @@ export class GenCompiler {
   /**
    * Compile a .gen.aid file, recursively processing children.
    */
-  async compile(genAidPath: string): Promise<void> {
+  async compile(genAidPath: string, depth: number = 0): Promise<void> {
     const nodeDir = path.dirname(genAidPath);
     console.log(`[gen] Compiling ${genAidPath}`);
 
@@ -95,8 +109,13 @@ export class GenCompiler {
       this.differ.pruneBranch(nodeDir);
     }
 
+    // Check depth limit
+    if (depth >= MAX_DEPTH) {
+      console.log(`[gen] Max depth reached (${MAX_DEPTH}), forcing leaf creation`);
+    }
+
     // Process with LLM
-    await this.processWithLLM(content, nodeDir);
+    await this.processWithLLM(content, nodeDir, depth);
 
     // Save for future diffing
     this.differ.savePrevious(genAidPath, content);
@@ -105,45 +124,32 @@ export class GenCompiler {
   /**
    * Use LLM to process the .aid content and generate children
    */
-  private async processWithLLM(content: string, nodeDir: string): Promise<void> {
-    const tools = [
+  private async processWithLLM(content: string, nodeDir: string, depth: number): Promise<void> {
+    // Only allow gen_node if we haven't reached max depth
+    const allowNodes = depth < MAX_DEPTH;
+    
+    const tools = allowNodes ? [
       {
         name: 'gen_node',
-        description: 'Create a child node for a complex sub-task. Must define interface.',
+        description: 'Create a child node for a complex sub-task with 3+ subcomponents. USE SPARINGLY.',
         parameters: {
           type: Type.OBJECT,
           properties: {
             name: { 
               type: Type.STRING, 
-              description: 'Name of the child node (becomes folder name)' 
-            },
-            interface: {
-              type: Type.OBJECT,
-              description: 'Interface this node provides to siblings',
-              properties: {
-                files: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: 'Files this node will create'
-                },
-                exports: {
-                  type: Type.OBJECT,
-                  description: 'Map of file path to exported names'
-                }
-              },
-              required: ['files']
+              description: 'Name of the child node - must be different from parent!' 
             },
             content: { 
               type: Type.STRING, 
-              description: 'The .aid specification for this child' 
+              description: 'The .aid specification for this child - be specific!' 
             }
           },
-          required: ['name', 'interface', 'content']
+          required: ['name', 'content']
         }
       },
       {
         name: 'gen_leaf',
-        description: 'Create a leaf node for an atomic implementation task.',
+        description: 'Create a leaf node for actual code generation. PREFERRED CHOICE.',
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -153,17 +159,47 @@ export class GenCompiler {
             },
             prompt: { 
               type: Type.STRING, 
-              description: 'Detailed implementation instructions including interfaces' 
+              description: 'DETAILED instructions with exact types, function signatures, behavior' 
             },
             files: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: 'Files this leaf will create (relative paths)'
+              description: 'Files this leaf will create'
             },
             commands: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: 'Shell commands to run (must be whitelisted)'
+              description: 'Shell commands to run (npm install, bun install only)'
+            }
+          },
+          required: ['name', 'prompt', 'files']
+        }
+      }
+    ] : [
+      // At max depth, only allow leaf creation
+      {
+        name: 'gen_leaf',
+        description: 'Create a leaf node for actual code generation.',
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            name: { 
+              type: Type.STRING, 
+              description: 'Name of the leaf (becomes folder name)' 
+            },
+            prompt: { 
+              type: Type.STRING, 
+              description: 'DETAILED instructions with exact types, function signatures, behavior' 
+            },
+            files: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'Files this leaf will create'
+            },
+            commands: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: 'Shell commands to run (npm install, bun install only)'
             }
           },
           required: ['name', 'prompt', 'files']
@@ -210,7 +246,7 @@ export class GenCompiler {
 
           try {
             if (call.name === 'gen_node') {
-              result = await this.handleGenNode(call.args as GenNodeArgs, nodeDir);
+              result = await this.handleGenNode(call.args as GenNodeArgs, nodeDir, depth);
             } else if (call.name === 'gen_leaf') {
               result = await this.handleGenLeaf(call.args as GenLeafArgs, nodeDir);
             } else {
@@ -251,7 +287,8 @@ export class GenCompiler {
    */
   private async handleGenNode(
     args: GenNodeArgs, 
-    parentDir: string
+    parentDir: string,
+    parentDepth: number
   ): Promise<{ success: boolean; path?: string; error?: string }> {
     const { name, content } = args;
     
@@ -264,6 +301,13 @@ export class GenCompiler {
       return { success: false, error: 'Invalid node name' };
     }
 
+    // Check for suspicious recursion patterns
+    const parentName = path.basename(parentDir);
+    if (name === parentName || name.includes(parentName) || parentName.includes(name)) {
+      console.warn(`[gen] Suspicious recursion: parent=${parentName}, child=${name}`);
+      return { success: false, error: `Recursion detected: ${name} is too similar to parent ${parentName}. Use gen_leaf instead.` };
+    }
+
     const childDir = path.join(parentDir, name);
     const childPath = path.join(childDir, 'node.gen.aid');
 
@@ -274,8 +318,8 @@ export class GenCompiler {
     fs.writeFileSync(childPath, content, 'utf-8');
     console.log(`[gen] Created node: ${childPath}`);
 
-    // Recursively compile child
-    await this.compile(childPath);
+    // Recursively compile child with incremented depth
+    await this.compile(childPath, parentDepth + 1);
 
     return { success: true, path: childPath };
   }
