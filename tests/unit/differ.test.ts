@@ -18,24 +18,19 @@ import {
   writeAidgFile,
   writeAidcFile,
 } from "../../src/compiler";
-import type { NodeContext } from "../../src/types";
+import type { ChildContext } from "../../src/types";
 
 // Test directory in /tmp
 const TEST_DIR = "/tmp/aidef-differ-tests";
 
 /**
- * Create a mock NodeContext for testing.
+ * Create a mock ChildContext for testing.
  */
-function createMockContext(overrides: Partial<NodeContext> = {}): NodeContext {
+function createMockContext(overrides: Partial<ChildContext> = {}): ChildContext {
   return {
-    module: "test",
-    ancestry: ["root", "test"],
-    parameters: {},
     interfaces: {},
     constraints: [],
-    suggestions: [],
     utilities: [],
-    queryFilters: [],
     ...overrides,
   };
 }
@@ -101,9 +96,9 @@ describe("Differ", () => {
       expect(hashContext(context1)).not.toBe(hashContext(context2));
     });
 
-    test("returns different hash when ancestry changes", () => {
-      const context1 = createMockContext({ ancestry: ["root", "a"] });
-      const context2 = createMockContext({ ancestry: ["root", "b"] });
+    test("returns different hash when forwarding changes", () => {
+      const context1 = createMockContext({ forwarding: { utilities: ["a"] } });
+      const context2 = createMockContext({ forwarding: { utilities: ["b"] } });
       expect(hashContext(context1)).not.toBe(hashContext(context2));
     });
 
@@ -155,7 +150,7 @@ describe("Differ", () => {
   describe("diffNode", () => {
     test("returns needsRecompile=true when no cache exists", async () => {
       const spec = "server { handles requests }";
-      const parentContext = createMockContext({ ancestry: ["root"] });
+      const parentContext = createMockContext();
 
       const result = await diffNode("server", spec, parentContext, TEST_DIR);
 
@@ -164,14 +159,14 @@ describe("Differ", () => {
     });
 
     test("returns needsRecompile=true when spec changes", async () => {
-      const parentContext = createMockContext({ ancestry: ["root"] });
+      const parentContext = createMockContext();
       const spec1 = "server { old spec }";
       const spec2 = "server { new spec }";
 
       // Write initial cached files
       await writeAidgFile(TEST_DIR, "server", spec1);
       const context = addCacheMetadata(
-        createMockContext({ module: "server" }),
+        createMockContext(),
         hashContent(spec1),
         hashContext(parentContext)
       );
@@ -186,16 +181,15 @@ describe("Differ", () => {
 
     test("returns needsRecompile=true when parent context changes", async () => {
       const spec = "server { same spec }";
-      const parentContext1 = createMockContext({ ancestry: ["root"] });
+      const parentContext1 = createMockContext();
       const parentContext2 = createMockContext({
-        ancestry: ["root"],
         constraints: [{ rule: "New constraint", source: "root" }],
       });
 
       // Write initial cached files
       await writeAidgFile(TEST_DIR, "server", spec);
       const context = addCacheMetadata(
-        createMockContext({ module: "server" }),
+        createMockContext(),
         hashContent(spec),
         hashContext(parentContext1)
       );
@@ -210,12 +204,12 @@ describe("Differ", () => {
 
     test("returns needsRecompile=false when cache is valid", async () => {
       const spec = "server { same spec }";
-      const parentContext = createMockContext({ ancestry: ["root"] });
+      const parentContext = createMockContext();
 
       // Write initial cached files
       await writeAidgFile(TEST_DIR, "server", spec);
       const context = addCacheMetadata(
-        createMockContext({ module: "server" }),
+        createMockContext(),
         hashContent(spec),
         hashContext(parentContext)
       );

@@ -16,7 +16,7 @@ AIDef's core architectural principle: **each compilation agent is sandboxed**. T
 | Resource | Description |
 |----------|-------------|
 | `node.aidg` | The compiled specification for this node |
-| `node.aidc` | Context file (YAML) with info from ancestors |
+| Context from parent | Interfaces, constraints, utilities passed in-memory |
 | Referenced files | Files explicitly referenced in the spec |
 | Answered questions | Resolved entries from `node.aidq` |
 
@@ -25,124 +25,123 @@ AIDef's core architectural principle: **each compilation agent is sandboxed**. T
 | Resource | Why |
 |----------|-----|
 | Other `.aid` files | Would break isolation |
-| Sibling `.aidc` files | Siblings are parallel |
+| Sibling context | Siblings are parallel, no cross-talk |
+| Grandparent details | Parent encapsulates what child needs |
 | `.aid-gen/` folder | Build artifacts shouldn't influence builds |
 | `build/` folder | Generated code shouldn't influence generation |
 
-## The `.aidc` Context File
+## The Encapsulation Model
 
-Each node receives a `node.aidc` (YAML) containing **all context that might be relevant**:
-
-```yaml
-module: server.api
-ancestry:
-  - root
-  - server
-  - api
-tags:
-  - api
-  - http
-
-interfaces:
-  User:
-    source: root
-    definition: |
-      interface User {
-        id: string;
-        email: string;
-      }
-  ApiResponse:
-    source: server
-    definition: |
-      interface ApiResponse<T> {
-        data: T;
-        error?: string;
-      }
-
-constraints:
-  - rule: TypeScript strict mode
-    source: root
-    important: true
-  - rule: validate all inputs with Zod
-    source: server
-    important: true
-
-suggestions:
-  - rule: use Hono for routing
-    source: server.api
-
-utilities:
-  - name: validateRequest
-    signature: "(schema: ZodSchema, req: Request) => Promise<T>"
-    location: utils/validate.ts
-    source: server
-
-conventions:
-  - rule: prefer Bun APIs over Node
-    source: root
-    selector: "*"
-```
-
-### Context Filter Agent
-
-Before generation, a separate agent reads `.aidc` and decides **what's actually relevant**:
+Context flows **strictly from parent to child**. Unlike a global accumulation model, each parent acts as a **context gateway**:
 
 ```
-node.aidc (full context)
-    │
-    ├── [Context Filter Agent]
-    │   "This is an auth module."
-    │   "Relevant: User interface, bcrypt constraint"
-    │   "Not relevant: database conventions, UI patterns"
-    │
-    ▼
-Filtered context → Generation Agent
+Parent compiles:
+  Input:  parent's spec + context received from grandparent
+  Output: 
+    - Per-child specs (what each child should implement)
+    - Per-child context (what each child needs to know)
+
+Child compiles:
+  Input:  spec + context from parent (NOT from file, NOT from grandparent)
+  Output: per-grandchild specs + per-grandchild context
 ```
 
-Future: A "skills" system could trigger specific rules based on keywords.
+### What Gets Passed (Parent → Child)
 
-## Context Flow
+The parent explicitly decides what each child receives:
 
-### Parent → Child
+```typescript
+interface ChildContext {
+  // What this child must implement
+  interfaces: {
+    [name: string]: {
+      definition: string;  // TypeScript interface or description
+      source: string;      // Which ancestor defined it
+    };
+  };
+  
+  // Rules this child must follow
+  constraints: Array<{
+    rule: string;
+    source: string;
+  }>;
+  
+  // Utilities this child can use
+  utilities: Array<{
+    name: string;
+    signature: string;
+    location: string;  // Where to import from
+  }>;
+}
+```
+
+**NOT passed automatically:**
+- Suggestions (that's for `.aids` files)
+- Grandparent's internal details (encapsulated by parent)
+- Sibling information
+- Everything from all ancestors
+
+### Example: Selective Context Passing
+
+```aid
+database {
+  Implements connection pooling and query execution.
+  
+  Interfaces:
+  ```typescript
+  interface DbConnection {
+    query<T>(sql: string, params?: any[]): Promise<T[]>;
+    transaction<T>(fn: (tx: Transaction) => Promise<T>): Promise<T>;
+  }
+  ```
+  
+  The `connection` submodule implements pooling internals.
+  - Give it the `logger` utility
+  - Do NOT give it the DbConnection interface (it defines it)
+  
+  The `queries` submodule implements specific queries.
+  - Give it the DbConnection interface
+  - Give it the `logger` utility
+  - Forward `logger` to its submodules
+}
+```
+
+The parent decides:
+- `connection` gets: `logger`
+- `queries` gets: `DbConnection`, `logger`, instruction to forward `logger`
+
+## Why Encapsulation Matters
+
+**Without encapsulation** (accumulating all ancestor context):
+- Children see irrelevant details from grandparents
+- Token budgets explode for deep trees
+- Changes in one branch leak into unrelated branches
+- AI gets confused by too much context
+
+**With encapsulation** (parent passes only what's needed):
+- Children see exactly what they need
+- Context size stays bounded regardless of tree depth
+- Changes are isolated to affected branches
+- AI has clear, focused instructions
+
+## File Structure
 
 ```
-root.aid
-    │
-    ├── [Compilation Agent]
-    │   Outputs: child node.aidg + child node.aidc
-    │
-    ▼
-server/node.aidc contains:
-  - All interfaces from root
-  - All constraints (with source annotations)
-  - All conventions that might apply
-  - Utilities declared at root level
-
-server/node.aidg + server/node.aidc
-    │
-    ├── [Context Filter] → [Compilation Agent]
-    │
-    ▼
-server/api/node.aidc contains:
-  - Everything from server/node.aidc
-  - Plus: interfaces declared in server
-  - Plus: constraints from server
+.aid-gen/
+├── root.aidg           # The compiled spec
+├── root.aidg.map       # Source map (where each line came from)
+├── root.aidq           # Questions for human review
+├── server/
+│   ├── node.aidg       # Server module spec
+│   ├── node.aidg.map   # Server source map
+│   └── api/
+│       ├── node.aidg   # API module spec
+│       └── node.aidg.map
 ```
 
-### What Gets Passed (in `.aidc`)
+**No `.aidc` files** - context is passed in-memory during compilation, not stored in files.
 
-1. **Interfaces**: Types, function signatures (with source)
-2. **Constraints**: Rules with `important` flag
-3. **Conventions**: Patterns from ancestor selectors
-4. **Utilities**: Signatures and locations (not implementations)
-5. **Tags**: What tags apply to this module
-6. **Ancestry**: Full path from root
-
-### What Doesn't Get Passed
-
-1. **Implementation details**: How things work internally
-2. **Sibling information**: What parallel nodes are doing
-3. **Intermediate reasoning**: Why ancestor decisions were made
+**Source maps** (`.aidg.map`) track traceability without polluting the readable `.aidg` files.
 
 ## Shared Utilities
 
@@ -150,22 +149,32 @@ server/api/node.aidc contains:
 
 If agents can't read each other's outputs, how do shared utilities work?
 
-### The Solution: Declare in `.aidc`, Generate Once
+### The Solution: Parent Declares, Child Implements
 
-Parent declares utility in context:
+Parent declares a utility in prose:
 
-```yaml
-utilities:
-  - name: hashPassword
-    signature: "(plain: string) => Promise<string>"
-    location: utils/hash.ts
-    source: root
+```aid
+root {
+  Shared utilities:
+  - hashPassword @ utils/hash.ts: (plain: string) => Promise<string>
+  
+  The `auth` module implements hashPassword.
+  The `users` module can use hashPassword.
+}
 ```
 
-Children receive this in their `.aidc` and use the signature:
+Parent passes to `auth`:
+- Instruction to implement `hashPassword`
+- The signature it must match
+
+Parent passes to `users`:
+- The `hashPassword` utility signature and location
+- (NOT the implementation details)
+
+Children use the signature:
 
 ```typescript
-// Child knows signature from node.aidc
+// users module knows signature from parent context
 import { hashPassword } from '../utils/hash';
 
 async function createUser(password: string) {
@@ -173,65 +182,58 @@ async function createUser(password: string) {
 }
 ```
 
-A dedicated leaf node generates the actual utility files.
+## Utility Forwarding
 
-## Interface Contracts
+Parents control what flows to grandchildren:
 
-### Strict vs. Flexible
-
-Constraints in `.aidc` include an `important` flag:
-
-```yaml
-constraints:
-  - rule: AuthService interface must match exactly
-    important: true
-  - rule: Logger interface can be extended
-    important: false
+```aid
+server {
+  Has access to: logger, db
+  
+  api {
+    // Parent explicitly forwards
+    Give it: logger, db
+    Tell it to forward logger to its children
+  }
+  
+  internal {
+    // Parent restricts access
+    Give it: logger only
+    Do NOT give it db access
+  }
+}
 ```
 
-### Post-Generation Checks (TODO)
+This is just prose—the AI understands and structures the context accordingly.
 
-After generation, verify:
-1. Outputs conform to declared interfaces
-2. No forbidden file access patterns
-3. Utility imports match declared signatures
+## Interface-Driven Design
 
-## Independent Submodules
+The compiler LLM is prompted to be **interface-driven**:
 
-Each folder in `.aid-gen/` is a complete, runnable unit:
-- `node.aidg` - The compiled specification
-- `node.aidc` - All context from ancestors
+1. **Extract interfaces** from the parent's prose
+2. **Design child interfaces first** before spawning children
+3. **Explicitly pass context** to each child (not broadcast everything)
 
-You can `cd` into any `.aid-gen/` subfolder and run `aid .` to compile just that subtree.
+This enables parallelization—all children can start as soon as parent defines their interfaces.
 
-## Example: Multi-Level Flow
-
-```
-root.aid
-├── (no .aidc - this is root)
-├── Outputs to children:
-│   - AppConfig interface
-│   - Logger utility @ utils/logger.ts
-│
-└── .aid-gen/server/
-    ├── node.aidg
-    ├── node.aidc: 
-    │     interfaces: [AppConfig]
-    │     utilities: [Logger]
-    ├── Outputs to children:
-    │   - BaseService class
-    │   - validateInput utility
-    │
-    └── api/
-        ├── node.aidg
-        ├── node.aidc:
-        │     interfaces: [AppConfig, BaseService]
-        │     utilities: [Logger, validateInput]
-        │
-        └── routes/
-            ├── node.aidg (leaf)
-            ├── node.aidc: (everything above)
-            └── Generates: routes.ts
+```aid
+api {
+  Interfaces all handlers must implement:
+  ```typescript
+  interface Handler {
+    handle(req: Request): Promise<Response>;
+  }
+  ```
+  
+  Create handlers for:
+  - users (CRUD operations)
+  - auth (login, logout, refresh)
+  - health (status check)
+  
+  All handlers receive the Handler interface.
+  users and auth receive the db utility.
+  health receives nothing extra.
+}
 ```
 
 ## Anti-Patterns
@@ -244,29 +246,82 @@ auth { ... }
 users { needs auth first }
 ```
 
-### Do: Explicit Context
+### Do: Parent Provides Interface
 
 ```aid
-// GOOD: Parent provides interface
-AuthService interface available to all children.
+// GOOD: Parent defines what children share
+AuthService interface available to: auth (implements), users (uses)
 
 auth { implements AuthService }
-users { consumes AuthService }
+users { uses AuthService }
 ```
 
-### Don't: File Path Assumptions
+### Don't: Assume Grandparent Context
 
 ```aid
-// BAD
-Import from ../../auth/session.ts
+// BAD: Child assumes it has grandparent's utilities
+deeply-nested-module {
+  use the logger from root  // May not have been forwarded!
+}
 ```
 
-### Do: Declared Utilities
+### Do: Trust What Parent Gave You
 
 ```aid
-// GOOD: Declared in parent, received via .aidc
-hashPassword utility @ utils/hash.ts
+// GOOD: Use what you received
+deeply-nested-module {
+  use the logger utility  // Parent forwarded it explicitly
+}
 ```
+
+## Example: Multi-Level Flow
+
+```
+root.aid compiles:
+  - Defines: AppConfig interface, Logger utility
+  - Passes to server: AppConfig, Logger
+  - Passes to cli: AppConfig (no Logger needed)
+
+server compiles:
+  - Receives: AppConfig, Logger
+  - Defines: BaseService class
+  - Passes to api: AppConfig, Logger, BaseService
+  - Passes to worker: Logger only (doesn't need AppConfig)
+
+api compiles:
+  - Receives: AppConfig, Logger, BaseService
+  - Defines: Handler interface
+  - Passes to users: Handler, Logger
+  - Passes to health: Handler only
+
+users compiles (leaf):
+  - Receives: Handler, Logger
+  - Generates: users.ts implementing Handler, using Logger
+```
+
+Each level only knows what its parent passed. `users` has no idea about `BaseService` or `AppConfig`—its parent decided those weren't relevant.
+
+## Source Maps
+
+Source maps track where each piece came from without polluting `.aidg` files:
+
+```json
+// server/api/node.aidg.map
+{
+  "version": 3,
+  "file": "node.aidg",
+  "sources": ["../../../server.aid", "../../../root.aid"],
+  "mappings": [
+    {"line": 1, "source": "server.aid", "sourceLine": 45},
+    {"line": 5, "source": "root.aid", "sourceLine": 12}
+  ]
+}
+```
+
+This enables:
+- "Where did this constraint come from?" → trace to original `.aid` file
+- "What generated code does this spec affect?" → trace forward to `build/`
+- Analysis tools can correlate AI decisions with source lines
 
 ## Debugging
 
@@ -276,26 +331,24 @@ hashPassword utility @ utils/hash.ts
 aid . --verbose
 ```
 
-Shows context for each node:
+Shows what each child receives:
 
 ```
 Compiling server/api
-  node.aidc contains:
-    - Interfaces: ApiResponse, User (2)
-    - Utilities: validateRequest, logger (2)
-    - Constraints: 5 (2 important)
-    - Tags: api, http
+  Parent passed:
+    - Interfaces: AppConfig, Logger, BaseService (3)
+    - Constraints: 2
+    - Utilities: logger @ utils/logger.ts
   
-  Context filter selected:
-    - Interfaces: ApiResponse
-    - Utilities: validateRequest
-    - Constraints: 2 important
+  Generating children:
+    - users: Handler, Logger
+    - health: Handler
 ```
 
 ### Common Errors
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Cannot resolve import" | Undeclared utility | Add to parent's declarations |
-| "Interface mismatch" | Child diverged | Update constraint or implementation |
-| "Missing context" | `.aidc` incomplete | Parent should include it |
+| "Unknown utility" | Parent didn't forward it | Add forwarding instruction to parent |
+| "Interface mismatch" | Child diverged from interface | Update constraint or implementation |
+| "Missing context" | Expected something parent didn't pass | Update parent to pass it |

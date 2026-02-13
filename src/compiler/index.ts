@@ -12,9 +12,15 @@ export {
 } from "./compile-node.js";
 
 export {
-  buildChildContext,
+  // New context model
   createRootContext,
   buildNodePath,
+  mergeContexts,
+  isEmptyContext,
+  formatContext,
+  // Legacy support (deprecated)
+  createLegacyRootContext,
+  buildChildContext,
 } from "./context-builder.js";
 
 export {
@@ -36,3 +42,13 @@ export {
   type DiffResult,
   type CacheMetadata,
 } from "./differ.js";
+
+export {
+  SourceMapBuilder,
+  serializeSourceMap,
+  parseSourceMap,
+  writeSourceMap,
+  readSourceMap,
+  lookupSourceLocation,
+  getContributingSources,
+} from "./source-map.js";

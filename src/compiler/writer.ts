@@ -1,8 +1,11 @@
 /**
  * File Writer
  *
- * Writes .aidg, .aidc, and .aidq files to the .aid-gen/ directory.
+ * Writes .aidg and .aidq files to the .aid-gen/ directory.
  * Uses Bun.file() and Bun.write() for file operations.
+ *
+ * Note: .aidc file operations are deprecated. Context is now passed in-memory
+ * from parent to child nodes during compilation instead of being stored in files.
  */
 
 import { join, dirname } from "node:path";
@@ -28,6 +31,10 @@ export async function writeAidgFile(
 
 /**
  * Write an .aidc file (YAML/JSON context format).
+ *
+ * @deprecated Context is now passed in-memory from parent to child nodes.
+ * This function exists for backward compatibility only and will be removed
+ * in a future version. Do not use in new code.
  *
  * @param outputDir - The .aid-gen/ directory
  * @param nodePath - The node path (e.g., "server/api")
@@ -68,6 +75,10 @@ export async function writeAidqFile(
 
 /**
  * Read an .aidc file and parse it back to NodeContext.
+ *
+ * @deprecated Context is now passed in-memory from parent to child nodes.
+ * This function exists for backward compatibility only and will be removed
+ * in a future version. Do not use in new code.
  *
  * @param outputDir - The .aid-gen/ directory
  * @param nodePath - The node path (e.g., "server/api")
@@ -151,6 +162,7 @@ function getAidgPath(outputDir: string, nodePath: string): string {
 
 /**
  * Get the path for an .aidc file.
+ * @deprecated Used only by deprecated aidc functions.
  */
 function getAidcPath(outputDir: string, nodePath: string): string {
   if (nodePath === "root") {
@@ -175,6 +187,7 @@ function getAidqPath(outputDir: string, nodePath: string): string {
 
 /**
  * Serialize NodeContext to JSON (could use YAML in the future).
+ * @deprecated Used only by deprecated aidc functions.
  */
 function serializeContext(context: NodeContext): string {
   return JSON.stringify(context, null, 2);
@@ -182,6 +195,7 @@ function serializeContext(context: NodeContext): string {
 
 /**
  * Deserialize JSON to NodeContext.
+ * @deprecated Used only by deprecated aidc functions.
  */
 function deserializeContext(content: string): NodeContext {
   return JSON.parse(content) as NodeContext;

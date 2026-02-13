@@ -1,11 +1,5 @@
 # AIDef Philosophy
 
-<!-- 
-  TODO: Consider renaming to "Cascading AI" with .cai extension.
-  The CSS parallel is strong: cascading rules, specificity, inheritance.
-  Domain aidef.dev is already owned.
--->
-
 ## A Programming Language for AI
 
 AIDef is best understood as **a programming language where AI is the runtime**.
@@ -82,13 +76,9 @@ JWT for sessions would be nice, but I'm open to alternatives.
 
 That's it. The AI reads your intent.
 
-### Optional CSS-Like Syntax
+### Nginx-Like Syntax
 
-For power users, we provide a CSS-inspired syntax for structure and scoping. This gives you:
-
-- **Free editor support**: Set `filetype=css` for syntax highlighting
-- **Familiar semantics**: Selectors, specificity, nesting
-- **Comments that stay human-side**: `/* */` and `//` are stripped before AI sees content
+We use an nginx-inspired syntax for structure:
 
 ```aid
 /*
@@ -96,31 +86,34 @@ For power users, we provide a CSS-inspired syntax for structure and scoping. Thi
   See postmortem-001.md. AST is mandatory now.
 */
 
-A Garmin watchface displaying hourly weather.
+A Garmin watchface displaying hourly weather;
 
 // Global constraints
-TypeScript for all non-device code.
-
-.mc {
-  // Applies wherever MonkeyC code is relevant
-  use bit packing, avoid stored structures
-}
+TypeScript for all non-device code;
 
 server {
   api {
-    device-specific token auth
-    open-meteo for weather data
+    device-specific token auth;
+    open-meteo for weather data;
   }
 }
 
 ui {
   transpiler {
-    AST parser, not regex !important
+    leaf=true;
+    AST parser, not regex;
   }
 }
 ```
 
-The syntax is entirely optional—plain English always works. See [file-formats.md](file-formats.md) for the full reference.
+Only six hardcoded patterns:
+- `name { }` — module block
+- `"question?" { }` — query filter (LLM-evaluated)
+- `include ./path;` — import file
+- `/* */` and `//` — comments (stripped before AI sees content)
+- `;` — statement terminator
+
+Everything else is prose. See [file-formats.md](file-formats.md) for the full reference.
 
 ### Comments Are For Humans
 
@@ -134,11 +127,11 @@ Just like in regular code, comments exist to explain *why* something is there—
 */
 
 auth {
-  two-factor verification is required !important
+  two-factor verification is required;
 }
 ```
 
-The `/* */` and `//` comments are stripped before the AI sees the content. The `!important` emphasis carries through to child modules.
+The `/* */` and `//` comments are stripped before the AI sees the content.
 
 ## The AI Modular Enforcement Problem
 
@@ -150,6 +143,86 @@ AIDef enforces modularity by architecture:
 - Interfaces must be **declared** before they can be used
 
 If a node doesn't need to know about something, it literally cannot access it. This isn't just good practice—it's physically enforced.
+
+## Context Flow: The Encapsulation Model
+
+This is fundamental to how AIDef works.
+
+### Parent-Child Context Passing
+
+Context flows **strictly from parent to child**. A child only knows what its parent explicitly passes:
+
+```
+Parent compiles:
+  Input:  parent's spec + context from grandparent
+  Output: child specs + per-child context
+
+Child compiles:
+  Input:  child spec + context from parent (NOT grandparent)
+  Output: grandchild specs + per-grandchild context
+```
+
+This is like function parameters—not global variables. The parent acts as a **context gateway**, deciding:
+1. What interfaces this child needs to implement
+2. What constraints apply to this child
+3. What utilities this child can use
+4. What should be forwarded to grandchildren
+
+### Interface-Driven Design
+
+Parents define interfaces in prose, typically using code blocks:
+
+```aid
+server {
+  A REST API server.
+  
+  Interfaces:
+  ```typescript
+  interface RequestHandler {
+    handle(req: Request): Response;
+  }
+  ```
+  
+  The `handlers` submodule implements RequestHandler.
+  The `middleware` submodule can use the `logger` utility.
+  Forward the `db` utility to all submodules.
+}
+```
+
+The compiler LLM is prompted to:
+1. **Extract interfaces** from the parent's prose
+2. **Design child interfaces** before spawning children
+3. **Explicitly pass context** to each child (not broadcast everything)
+
+### Why This Matters
+
+**Without encapsulation** (accumulating all ancestor context):
+- Children see irrelevant details from grandparents
+- Token budgets explode for deep trees
+- Changes in one branch leak into unrelated branches
+- AI gets confused by too much context
+
+**With encapsulation** (parent passes only what's needed):
+- Children see exactly what they need
+- Context size stays bounded
+- Changes are isolated
+- AI has clear, focused instructions
+
+### Utility Forwarding
+
+Parents explicitly control what flows to grandchildren:
+
+```aid
+database {
+  Implements the db utility with connection pooling.
+  
+  The `queries` submodule implements specific queries.
+  Forward the `logger` utility to `queries`.
+  Do NOT forward connection internals - queries uses the db interface only.
+}
+```
+
+This is just prose—the AI understands and structures the context accordingly.
 
 ## Parallel by Default
 
@@ -168,6 +241,18 @@ The system never asks blocking questions during execution. Instead:
 
 This keeps the pipeline flowing and lets you batch-review decisions.
 
+## File Types
+
+| Extension | Purpose |
+|-----------|---------|
+| `.aid` | User source files (committed to git) |
+| `.aidg` | Generated specs in `.aid-gen/` (gitignored) |
+| `.aidg.map` | Source maps for traceability |
+| `.aidq` | Questions for human review |
+| `.aids` | Optimization suggestions (future) |
+
+The `.aidg` files are clean and human-readable. Source maps (`.aidg.map`) track where each line came from without polluting the spec.
+
 ## The Payoffs
 
 ### For Large Projects
@@ -184,7 +269,6 @@ This keeps the pipeline flowing and lets you batch-review decisions.
 - You're still writing code (just for a different runtime)
 - Version control, diffs, branches all work normally
 - Familiar patterns: modules, interfaces, dependencies
-- CSS-like syntax means existing editor support
 
 ## The Trade-offs
 
@@ -195,4 +279,4 @@ AIDef is not magic. We explicitly accept:
 3. **Structure overhead**: The discipline may feel restrictive (but that's the point)
 4. **Propagation concerns**: Small changes might cascade (mitigated by interface-based diffing)
 
-We believe AI is now capable enough for this approach to work. The main remaining challenge is "lazy coding"—AI ignoring or simplifying the original goal. AIDef addresses this through interface enforcement, explicit context boundaries, and `!important` emphasis that persists through child generation.
+We believe AI is now capable enough for this approach to work. The main remaining challenge is "lazy coding"—AI ignoring or simplifying the original goal. AIDef addresses this through interface enforcement, explicit context boundaries, and the encapsulation model that keeps each node focused on its specific task.

@@ -4,9 +4,9 @@
  */
 
 import { dirname, join } from "node:path";
-import type { CLIOptions, Provider, ChildSpec, RootNode } from "../../types";
+import type { CLIOptions, Provider, ChildSpec, RootNode, ChildContext } from "../../types";
 import { parseAndResolve } from "../../parser/resolver.js";
-import { compileNode, createRootContext } from "../../compiler/index.js";
+import { compileNode, compileRootNode } from "../../compiler/index.js";
 import { getProvider, isValidProvider, getSupportedProviders } from "../../providers/index.js";
 import { setCallLogger, CallLogger } from "../../providers/call-logger.js";
 
@@ -105,14 +105,11 @@ export async function runCommand(options: CLIOptions): Promise<number> {
 
   console.log("Starting compilation...\n");
 
-  // Create root context
-  const rootContext = createRootContext(resolved.ast);
-
   // Compile recursively with parallelization
+  // Root receives empty context (no parent)
   try {
     await compileRecursively(
       resolved.ast,
-      rootContext,
       provider,
       outputDir,
       state,
@@ -153,14 +150,13 @@ export async function runCommand(options: CLIOptions): Promise<number> {
  */
 async function compileRecursively(
   node: RootNode,
-  context: typeof import("../../types").NodeContext.prototype,
   provider: Provider,
   outputDir: string,
   state: CompilationState,
   verbose: boolean
 ): Promise<void> {
-  // Compile the current node
-  const result = await compileNode(node, context, provider, outputDir);
+  // Compile the root node (uses createRootContext internally)
+  const result = await compileRootNode(node, provider, outputDir);
   
   state.completedNodes++;
   state.currentNodes.delete(result.nodePath || "root");
@@ -176,6 +172,7 @@ async function compileRecursively(
   }
 
   // If there are children, compile them in parallel
+  // Each child already has its context set in ChildSpec.context
   if (result.children.length > 0) {
     state.totalNodes += result.children.length;
     
@@ -187,7 +184,7 @@ async function compileRecursively(
     // Compile children in parallel
     await Promise.all(
       result.children.map((child) =>
-        compileChildNode(child, context, result, provider, outputDir, state, verbose)
+        compileChildNode(child, provider, outputDir, state, verbose)
       )
     );
   }
@@ -195,11 +192,10 @@ async function compileRecursively(
 
 /**
  * Compile a child node from a ChildSpec.
+ * The child's context is already set in childSpec.context (AI decides what each child gets).
  */
 async function compileChildNode(
   childSpec: ChildSpec,
-  parentContext: typeof import("../../types").NodeContext.prototype,
-  parentResult: Awaited<ReturnType<typeof compileNode>>,
   provider: Provider,
   outputDir: string,
   state: CompilationState,
@@ -224,15 +220,8 @@ async function compileChildNode(
     },
   };
 
-  // Build child context
-  const childContext = {
-    ...parentContext,
-    module: childSpec.name,
-    ancestry: [...parentContext.ancestry, childSpec.name],
-  };
-
-  // Compile the child
-  const result = await compileNode(childNode, childContext, provider, outputDir);
+  // Use the context from ChildSpec (parent already decided what this child receives)
+  const result = await compileNode(childNode, childSpec.context, provider, outputDir);
   
   state.completedNodes++;
   state.currentNodes.delete(childSpec.name);
@@ -247,6 +236,7 @@ async function compileChildNode(
   }
 
   // Recursively compile grandchildren
+  // Each grandchild's context is in result.children[].context
   if (result.children.length > 0) {
     state.totalNodes += result.children.length;
     
@@ -256,7 +246,7 @@ async function compileChildNode(
 
     await Promise.all(
       result.children.map((grandchild) =>
-        compileChildNode(grandchild, childContext, result, provider, outputDir, state, verbose)
+        compileChildNode(grandchild, provider, outputDir, state, verbose)
       )
     );
   }

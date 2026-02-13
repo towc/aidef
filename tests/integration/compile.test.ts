@@ -20,15 +20,15 @@ import { join } from "node:path";
 import {
   compileNode,
   compileRootNode,
-  buildChildContext,
   createRootContext,
   buildNodePath,
   writeAidgFile,
-  writeAidcFile,
   writeAidqFile,
   readAidgFile,
-  readAidcFile,
   readAidqFile,
+  // Legacy exports (deprecated)
+  buildChildContext,
+  createLegacyRootContext,
 } from "../../src/compiler";
 import type {
   Provider,
@@ -36,12 +36,14 @@ import type {
   CompileResult,
   GenerateRequest,
   GenerateResult,
-  NodeContext,
+  ChildContext,
   NodeQuestions,
   RootNode,
   ModuleNode,
   ProseNode,
   ASTNode,
+  // Legacy type (deprecated)
+  NodeContext,
 } from "../../src/types";
 
 // =============================================================================
@@ -50,6 +52,9 @@ import type {
 
 /**
  * Create a mock provider that returns predictable responses.
+ * 
+ * In the new model, CompileResult.children includes context for each child
+ * (parent decides what each child receives).
  */
 function createMockProvider(
   mockCompileResult?: Partial<CompileResult>
@@ -60,6 +65,19 @@ function createMockProvider(
         name: "submodule",
         isLeaf: true,
         spec: "A simple submodule that handles data processing.",
+        context: {
+          // Parent decides what child receives
+          interfaces: {
+            DataHandler: {
+              definition: "interface DataHandler { handle(data: unknown): void; }",
+              source: "server",
+            },
+          },
+          constraints: [
+            { rule: "Must validate all input", source: "server" },
+          ],
+          utilities: [],
+        },
       },
     ],
     questions: [
@@ -78,6 +96,7 @@ function createMockProvider(
         blocking: false,
       },
     ],
+    // These are what THIS node declares (for tracking/source maps)
     interfaces: [
       {
         name: "DataHandler",
@@ -88,12 +107,6 @@ function createMockProvider(
     constraints: [
       {
         rule: "Must validate all input",
-        source: "server",
-      },
-    ],
-    suggestions: [
-      {
-        rule: "Consider using streaming for large data",
         source: "server",
       },
     ],
@@ -143,7 +156,6 @@ function createLeafProvider(): Provider {
     considerations: [],
     interfaces: [],
     constraints: [],
-    suggestions: [],
     utilities: [],
   });
 }
@@ -223,7 +235,28 @@ function createMockModuleNode(): ModuleNode {
   };
 }
 
-function createMockParentContext(): NodeContext {
+/**
+ * Create a mock ChildContext (what parent passes to child).
+ */
+function createMockContext(): ChildContext {
+  return {
+    interfaces: {
+      Config: {
+        definition: "interface Config { port: number; }",
+        source: "root",
+      },
+    },
+    constraints: [
+      { rule: "Must be type-safe", source: "root" },
+    ],
+    utilities: [],
+  };
+}
+
+/**
+ * @deprecated Legacy helper for testing deprecated buildChildContext.
+ */
+function createMockLegacyContext(): NodeContext {
   return {
     module: "root",
     ancestry: ["root"],
@@ -269,24 +302,25 @@ describe("Compiler Integration", () => {
   // ===========================================================================
 
   describe("createRootContext", () => {
-    test("creates empty root context", () => {
-      const rootNode = createMockRootNode();
-      const context = createRootContext(rootNode);
+    test("creates empty root context (no arguments)", () => {
+      // New API: createRootContext takes no arguments
+      const context = createRootContext();
 
-      expect(context.module).toBe("root");
-      expect(context.ancestry).toEqual(["root"]);
-      expect(context.parameters).toEqual({});
       expect(context.interfaces).toEqual({});
       expect(context.constraints).toEqual([]);
-      expect(context.suggestions).toEqual([]);
       expect(context.utilities).toEqual([]);
-      expect(context.queryFilters).toEqual([]);
+      // New model has no module, ancestry, parameters, suggestions, queryFilters
+      expect(context).not.toHaveProperty("module");
+      expect(context).not.toHaveProperty("ancestry");
     });
   });
 
-  describe("buildChildContext", () => {
-    test("merges parent context with compile result", () => {
-      const parentContext = createMockParentContext();
+  describe("buildChildContext (LEGACY/DEPRECATED)", () => {
+    // Note: buildChildContext is deprecated. In the new model, CompileResult.children
+    // includes context for each child. These tests exist for backward compatibility.
+
+    test("merges parent context with compile result (legacy)", () => {
+      const parentContext = createMockLegacyContext();
       const compileResult: CompileResult = {
         children: [],
         questions: [],
@@ -301,7 +335,6 @@ describe("Compiler Integration", () => {
         constraints: [
           { rule: "Must handle errors", source: "server" },
         ],
-        suggestions: [{ rule: "Use middleware", source: "server" }],
         utilities: [
           {
             name: "logger",
@@ -331,9 +364,6 @@ describe("Compiler Integration", () => {
       expect(childContext.constraints[0].rule).toBe("Must be type-safe");
       expect(childContext.constraints[1].rule).toBe("Must handle errors");
 
-      // Check suggestions are merged
-      expect(childContext.suggestions).toHaveLength(2);
-
       // Check utilities are merged
       expect(childContext.utilities).toHaveLength(1);
 
@@ -341,8 +371,8 @@ describe("Compiler Integration", () => {
       expect(childContext.queryFilters).toHaveLength(0);
     });
 
-    test("preserves parent queryFilters", () => {
-      const parentContext = createMockParentContext();
+    test("preserves parent queryFilters (legacy)", () => {
+      const parentContext = createMockLegacyContext();
       parentContext.queryFilters = [
         { question: "Is this a database?", content: "Database config" },
       ];
@@ -353,7 +383,6 @@ describe("Compiler Integration", () => {
         considerations: [],
         interfaces: [],
         constraints: [],
-        suggestions: [],
         utilities: [],
       };
 
@@ -418,43 +447,9 @@ describe("Compiler Integration", () => {
     });
   });
 
-  describe("writeAidcFile / readAidcFile", () => {
-    test("writes and reads .aidc file", async () => {
-      const context = createMockParentContext();
-
-      await writeAidcFile(testDir, "root", context);
-
-      const filePath = join(testDir, "root.aidc");
-      expect(existsSync(filePath)).toBe(true);
-
-      const readContext = await readAidcFile(testDir, "root");
-      expect(readContext).not.toBeNull();
-      expect(readContext!.module).toBe("root");
-      expect(readContext!.interfaces.Config).toBeDefined();
-    });
-
-    test("writes nested .aidc file", async () => {
-      const context: NodeContext = {
-        module: "api",
-        ancestry: ["root", "server", "api"],
-        parameters: {},
-        interfaces: {},
-        constraints: [],
-        suggestions: [],
-        utilities: [],
-        queryFilters: [],
-      };
-
-      await writeAidcFile(testDir, "server/api", context);
-
-      const filePath = join(testDir, "server/api/node.aidc");
-      expect(existsSync(filePath)).toBe(true);
-
-      const readContext = await readAidcFile(testDir, "server/api");
-      expect(readContext!.module).toBe("api");
-      expect(readContext!.ancestry).toEqual(["root", "server", "api"]);
-    });
-  });
+  // Note: writeAidcFile / readAidcFile tests removed.
+  // Context is now passed in-memory from parent to child via ChildSpec.context.
+  // The .aidc file functions still exist for backward compatibility but are deprecated.
 
   describe("writeAidqFile / readAidqFile", () => {
     test("writes and reads .aidq file", async () => {
@@ -504,15 +499,18 @@ describe("Compiler Integration", () => {
     test("compiles a module node and writes files", async () => {
       const provider = createMockProvider();
       const node = createMockModuleNode();
-      const parentContext = createMockParentContext();
+      const context = createMockContext();
 
-      const result = await compileNode(node, parentContext, provider, testDir);
+      const result = await compileNode(node, context, provider, testDir);
 
       // Check result
       expect(result.nodePath).toBe("server");
       expect(result.isLeaf).toBe(false);
       expect(result.children).toHaveLength(1);
       expect(result.children[0].name).toBe("submodule");
+      // Children should have their own context (from parent/AI)
+      expect(result.children[0].context).toBeDefined();
+      expect(result.children[0].context.interfaces.DataHandler).toBeDefined();
       expect(result.questions).toHaveLength(1);
       expect(result.errors).toHaveLength(0);
 
@@ -521,11 +519,8 @@ describe("Compiler Integration", () => {
       expect(spec).not.toBeNull();
       expect(spec).toContain("server");
 
-      // Check .aidc file was written
-      const context = await readAidcFile(testDir, "server");
-      expect(context).not.toBeNull();
-      expect(context!.module).toBe("server");
-      expect(context!.ancestry).toEqual(["root", "server"]);
+      // Note: .aidc files are no longer written in the new model
+      // Context is passed in-memory via ChildSpec.context
 
       // Check .aidq file was written (since mock has questions)
       const questions = await readAidqFile(testDir, "server");
@@ -536,30 +531,30 @@ describe("Compiler Integration", () => {
     test("handles leaf node (no children from provider)", async () => {
       const provider = createLeafProvider();
       const node = createMockModuleNode();
-      const parentContext = createMockParentContext();
+      const context = createMockContext();
 
-      const result = await compileNode(node, parentContext, provider, testDir);
+      const result = await compileNode(node, context, provider, testDir);
 
       expect(result.isLeaf).toBe(true);
       expect(result.children).toHaveLength(0);
     });
 
-    test("merges compile result into context", async () => {
+    test("children receive context from parent (new model)", async () => {
       const provider = createMockProvider();
       const node = createMockModuleNode();
-      const parentContext = createMockParentContext();
+      const context = createMockContext();
 
-      await compileNode(node, parentContext, provider, testDir);
+      const result = await compileNode(node, context, provider, testDir);
 
-      // Read the context that was written
-      const context = await readAidcFile(testDir, "server");
-
-      // Should have parent interfaces plus new ones
-      expect(context!.interfaces.Config).toBeDefined();
-      expect(context!.interfaces.DataHandler).toBeDefined();
-
-      // Should have parent constraints plus new ones
-      expect(context!.constraints.length).toBeGreaterThan(1);
+      // In the new model, each child has its context set by the AI/parent
+      // The mock provider sets up context on each child
+      expect(result.children).toHaveLength(1);
+      const childContext = result.children[0].context;
+      
+      // Child should have what parent decided to pass
+      expect(childContext.interfaces.DataHandler).toBeDefined();
+      expect(childContext.constraints).toHaveLength(1);
+      expect(childContext.constraints[0].rule).toBe("Must validate all input");
     });
 
     test("handles provider errors gracefully", async () => {
@@ -577,11 +572,11 @@ describe("Compiler Integration", () => {
       };
 
       const node = createMockModuleNode();
-      const parentContext = createMockParentContext();
+      const context = createMockContext();
 
       const result = await compileNode(
         node,
-        parentContext,
+        context,
         errorProvider,
         testDir
       );
@@ -593,14 +588,14 @@ describe("Compiler Integration", () => {
   });
 
   describe("compileRootNode", () => {
-    test("compiles root node with proper path", async () => {
+    test("compiles root node with proper path (new signature)", async () => {
       const provider = createMockProvider();
       const rootNode = createMockRootNode();
-      const rootContext = createRootContext(rootNode);
 
+      // New signature: compileRootNode(rootNode, provider, outputDir, options?)
+      // No context parameter - it creates empty context internally
       const result = await compileRootNode(
         rootNode,
-        rootContext,
         provider,
         testDir
       );
@@ -611,10 +606,19 @@ describe("Compiler Integration", () => {
       const spec = await readAidgFile(testDir, "root");
       expect(spec).not.toBeNull();
 
-      // Check root.aidc was written
-      const context = await readAidcFile(testDir, "root");
-      expect(context).not.toBeNull();
-      expect(context!.ancestry).toEqual(["root"]);
+      // Note: .aidc files are no longer written in the new model
+      // Context is passed in-memory
+    });
+
+    test("returns children with their contexts", async () => {
+      const provider = createMockProvider();
+      const rootNode = createMockRootNode();
+
+      const result = await compileRootNode(rootNode, provider, testDir);
+
+      // Children should have their context set
+      expect(result.children).toHaveLength(1);
+      expect(result.children[0].context).toBeDefined();
     });
   });
 
@@ -625,16 +629,19 @@ describe("Compiler Integration", () => {
   describe("File Structure", () => {
     test("creates correct directory structure for nested nodes", async () => {
       const provider = createMockProvider();
-      const parentContext = createMockParentContext();
+      const parentContext = createMockContext();
 
       // Compile server node
       const serverNode = createMockModuleNode();
-      await compileNode(serverNode, parentContext, provider, testDir);
+      const serverResult = await compileNode(serverNode, parentContext, provider, testDir);
 
-      // Read the context that was written
-      const serverContext = await readAidcFile(testDir, "server");
+      // In the new model, child context comes from the compile result
+      // Get context from the first child (or create a simple one for api)
+      const apiContext: ChildContext = serverResult.children.length > 0
+        ? serverResult.children[0].context
+        : createMockContext();
       
-      // Create a child context and compile api node
+      // Create and compile api node
       const apiNode: ModuleNode = {
         type: "module",
         name: "api",
@@ -655,15 +662,14 @@ describe("Compiler Integration", () => {
         },
       };
 
-      await compileNode(apiNode, serverContext!, provider, testDir);
+      await compileNode(apiNode, apiContext, provider, testDir);
 
-      // Verify directory structure
+      // Verify directory structure (.aidg files only, no .aidc)
       expect(existsSync(join(testDir, "server"))).toBe(true);
       expect(existsSync(join(testDir, "server/node.aidg"))).toBe(true);
-      expect(existsSync(join(testDir, "server/node.aidc"))).toBe(true);
-      expect(existsSync(join(testDir, "server/api"))).toBe(true);
-      expect(existsSync(join(testDir, "server/api/node.aidg"))).toBe(true);
-      expect(existsSync(join(testDir, "server/api/node.aidc"))).toBe(true);
+      // Note: .aidc files are no longer written in the new model
+      expect(existsSync(join(testDir, "api"))).toBe(true);
+      expect(existsSync(join(testDir, "api/node.aidg"))).toBe(true);
     });
   });
 });

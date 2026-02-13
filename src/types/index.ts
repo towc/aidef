@@ -2,7 +2,10 @@
  * AIDef Type Definitions
  * 
  * This file defines all shared interfaces for the AIDef compiler.
- * Updated for nginx-like syntax (not CSS-like).
+ * 
+ * Key concept: Context flows strictly parent → child. Parents decide what
+ * each child receives (interfaces, constraints, utilities). No accumulation
+ * of all ancestor context.
  */
 
 // =============================================================================
@@ -172,114 +175,94 @@ export const RECOGNIZED_PARAMETERS = [
 export type RecognizedParameter = typeof RECOGNIZED_PARAMETERS[number];
 
 // =============================================================================
-// Compiled Node Types (output of compilation phase)
-// =============================================================================
-
-export interface CompiledNode {
-  name: string;
-  path: string;                      // e.g., "server/api"
-  ancestry: string[];                // ["root", "server", "api"]
-  
-  // Content
-  prose: string;                     // the natural language spec
-  
-  // Structure
-  children: string[];                // child module names
-  isLeaf: boolean;                   // no children = leaf
-  
-  // Parameters
-  parameters: Record<string, string | number>;
-  
-  // Extracted metadata
-  interfaces: InterfaceDeclaration[];
-  constraints: Constraint[];
-  suggestions: Suggestion[];
-  utilities: UtilityDeclaration[];
-}
-
-export interface InterfaceDeclaration {
-  name: string;
-  definition: string;                // the interface code/description
-  source: string;                    // which node declared this
-}
-
-export interface Constraint {
-  rule: string;
-  source: string;                    // which node declared this
-}
-
-export interface Suggestion {
-  rule: string;
-  source: string;
-}
-
-export interface UtilityDeclaration {
-  name: string;
-  signature: string;
-  location: string;                  // file path where it will be generated
-  source: string;                    // which node declared this
-}
-
-// =============================================================================
-// Context Types (.aidc file content)
+// Source Mapping (for traceability)
 // =============================================================================
 
 /**
- * Tracks the origin of a rule/constraint in the original .aid files.
- * Enables full traceability: build/ file → module → .aidc → original .aid files
+ * Tracks the origin of content in the original .aid files.
+ * Stored in .aidg.map files (not inline in .aidg).
  */
 export interface SourceOrigin {
   /** Module path that defined this (e.g., "root", "server/api") */
   module: string;
-  /** Original .aid file path (if known) */
-  file?: string;
-  /** Line range in the original file (if known) */
-  lines?: {
+  /** Original .aid file path */
+  file: string;
+  /** Line range in the original file */
+  lines: {
     start: number;
     end: number;
   };
 }
 
-export interface NodeContext {
-  module: string;
-  ancestry: string[];
-  
-  // Parameters from this node and ancestors
-  parameters: Record<string, string | number>;
-  
+/**
+ * Source map for a .aidg file.
+ * Follows a simplified version of the JS source map format.
+ */
+export interface SourceMap {
+  /** Version (always 3 for compatibility) */
+  version: 3;
+  /** The .aidg file this maps */
+  file: string;
+  /** Original source files referenced */
+  sources: string[];
+  /** Line-by-line mappings */
+  mappings: SourceMapping[];
+}
+
+export interface SourceMapping {
+  /** Line in the .aidg file (1-indexed) */
+  generatedLine: number;
+  /** Source file index (into sources array) */
+  sourceIndex: number;
+  /** Line in the source file (1-indexed) */
+  sourceLine: number;
+}
+
+// =============================================================================
+// Context Types (passed from parent to child)
+// =============================================================================
+
+/**
+ * Context that a parent passes to a child during compilation.
+ * 
+ * This is NOT accumulated from all ancestors - the parent explicitly
+ * decides what each child receives.
+ */
+export interface ChildContext {
+  /** What interfaces this child should implement or can use */
   interfaces: Record<string, {
-    source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin
-    definition: string;
+    definition: string;              // TypeScript interface or description
+    source: string;                  // Which module defined it
   }>;
   
+  /** Rules this child must follow */
   constraints: Array<{
     rule: string;
-    source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin
+    source: string;
   }>;
   
-  suggestions: Array<{
-    rule: string;
-    source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin
-  }>;
-  
+  /** Utilities this child can use */
   utilities: Array<{
     name: string;
     signature: string;
-    location: string;
-    source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin
+    location: string;                // Import path
   }>;
   
-  // Query filters that matched this module
-  queryFilters: Array<{
-    question: string;
-    content: string;             // the prose inside the filter block
-    sourceOrigin?: SourceOrigin;
-  }>;
+  /** Instructions for what to forward to grandchildren */
+  forwarding?: {
+    /** Utility names to forward to all grandchildren */
+    utilities?: string[];
+  };
 }
+
+/**
+ * Empty context for root node.
+ */
+export const EMPTY_CONTEXT: ChildContext = {
+  interfaces: {},
+  constraints: [],
+  utilities: [],
+};
 
 // =============================================================================
 // Question Types (.aidq file content)
@@ -317,7 +300,7 @@ export interface NodeQuestions {
 export interface Provider {
   name: string;
   
-  /** Compile a node spec into child specs */
+  /** Compile a node spec into child specs with their contexts */
   compile(request: CompileRequest): Promise<CompileResult>;
   
   /** Generate code from a leaf node */
@@ -328,33 +311,51 @@ export interface Provider {
 }
 
 export interface CompileRequest {
-  spec: string;                      // the .aidg content
-  context: NodeContext;              // from .aidc
-  nodePath: string;                  // for logging
+  /** The .aidg content for this node */
+  spec: string;
+  /** Context passed from parent (what this node can use) */
+  context: ChildContext;
+  /** Node path for logging (e.g., "server/api") */
+  nodePath: string;
 }
 
 export interface CompileResult {
+  /** Child specs with their contexts (parent decides what each child gets) */
   children: ChildSpec[];
+  /** Questions for human review */
   questions: NodeQuestions['questions'];
+  /** Considerations (non-blocking notes) */
   considerations: NodeQuestions['considerations'];
-  
-  // For .aidc generation
+  /** Interfaces this node defines (for source map tracking) */
   interfaces: InterfaceDeclaration[];
-  constraints: Constraint[];
-  suggestions: Suggestion[];
+  /** Constraints this node defines */
+  constraints: ConstraintDeclaration[];
+  /** Utilities this node defines */
   utilities: UtilityDeclaration[];
 }
 
+/**
+ * A child module spec with its context.
+ * Parent decides what context each child receives.
+ */
 export interface ChildSpec {
+  /** Module name */
   name: string;
+  /** Whether this is a leaf (no further children) */
   isLeaf: boolean;
-  spec: string;                      // content for child's .aidg
+  /** The spec content for the child's .aidg */
+  spec: string;
+  /** Context this child receives (from parent) */
+  context: ChildContext;
 }
 
 export interface GenerateRequest {
-  spec: string;                      // the .aidg content
-  context: NodeContext;              // from .aidc
-  nodePath: string;                  // for logging
+  /** The .aidg content for this leaf node */
+  spec: string;
+  /** Context passed from parent */
+  context: ChildContext;
+  /** Node path for logging */
+  nodePath: string;
 }
 
 export interface GenerateResult {
@@ -366,6 +367,28 @@ export interface GenerateResult {
 export interface GeneratedFile {
   path: string;                      // relative to build/
   content: string;
+}
+
+// =============================================================================
+// Declaration Types (extracted by AI during compilation)
+// =============================================================================
+
+export interface InterfaceDeclaration {
+  name: string;
+  definition: string;                // the interface code/description
+  source: string;                    // which node declared this
+}
+
+export interface ConstraintDeclaration {
+  rule: string;
+  source: string;                    // which node declared this
+}
+
+export interface UtilityDeclaration {
+  name: string;
+  signature: string;
+  location: string;                  // file path where it will be generated
+  source: string;                    // which node declared this
 }
 
 // =============================================================================
@@ -435,4 +458,44 @@ export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+}
+
+// =============================================================================
+// Legacy Types (for migration - to be removed)
+// =============================================================================
+
+/**
+ * @deprecated Use ChildContext instead. This accumulated all ancestor context.
+ */
+export interface NodeContext {
+  module: string;
+  ancestry: string[];
+  parameters: Record<string, string | number>;
+  interfaces: Record<string, {
+    source: string;
+    sourceOrigin?: SourceOrigin;
+    definition: string;
+  }>;
+  constraints: Array<{
+    rule: string;
+    source: string;
+    sourceOrigin?: SourceOrigin;
+  }>;
+  suggestions: Array<{
+    rule: string;
+    source: string;
+    sourceOrigin?: SourceOrigin;
+  }>;
+  utilities: Array<{
+    name: string;
+    signature: string;
+    location: string;
+    source: string;
+    sourceOrigin?: SourceOrigin;
+  }>;
+  queryFilters: Array<{
+    question: string;
+    content: string;
+    sourceOrigin?: SourceOrigin;
+  }>;
 }

@@ -6,7 +6,7 @@
  */
 
 import { createHash } from "node:crypto";
-import type { NodeContext, ASTNode, ModuleNode } from "../types/index.js";
+import type { ChildContext, ASTNode, ModuleNode } from "../types/index.js";
 import { readAidgFile, readAidcFile } from "./writer.js";
 
 /**
@@ -22,7 +22,7 @@ export interface DiffResult {
   /** Hash of the parent context (for caching) */
   contextHash: string;
   /** Existing cached context (if available and valid) */
-  cachedContext?: NodeContext;
+  cachedContext?: ChildContext;
 }
 
 /**
@@ -49,7 +49,7 @@ export interface CacheMetadata {
 export async function diffNode(
   nodePath: string,
   currentSpec: string,
-  parentContext: NodeContext,
+  parentContext: ChildContext,
   outputDir: string
 ): Promise<DiffResult> {
   const specHash = hashContent(currentSpec);
@@ -117,18 +117,18 @@ export async function diffNode(
 }
 
 /**
- * Add cache metadata to a NodeContext for future diffing.
+ * Add cache metadata to a ChildContext for future diffing.
  *
- * @param context - The NodeContext to augment
+ * @param context - The ChildContext to augment
  * @param specHash - Hash of the spec that produced this context
  * @param parentContextHash - Hash of the parent context
- * @returns A new NodeContext with cache metadata
+ * @returns A new ChildContext with cache metadata
  */
-export function addCacheMetadata(
-  context: NodeContext,
+export function addCacheMetadata<T extends ChildContext>(
+  context: T,
   specHash: string,
   parentContextHash: string
-): NodeContext & { _cache: CacheMetadata } {
+): T & { _cache: CacheMetadata } {
   return {
     ...context,
     _cache: {
@@ -140,12 +140,12 @@ export function addCacheMetadata(
 }
 
 /**
- * Extract cache metadata from a NodeContext if present.
+ * Extract cache metadata from a ChildContext if present.
  */
 export function extractCacheMetadata(
-  context: NodeContext
+  context: ChildContext
 ): CacheMetadata | null {
-  const cacheData = (context as NodeContext & { _cache?: CacheMetadata })._cache;
+  const cacheData = (context as ChildContext & { _cache?: CacheMetadata })._cache;
   if (!cacheData || !cacheData.specHash || !cacheData.parentContextHash) {
     return null;
   }
@@ -160,27 +160,20 @@ export function hashContent(content: string): string {
 }
 
 /**
- * Hash a NodeContext for comparison.
- * Only hashes the fields that affect child compilation.
+ * Hash a ChildContext for comparison.
+ * Hashes all fields that affect child compilation.
  */
-export function hashContext(context: NodeContext): string {
+export function hashContext(context: ChildContext): string {
   // Create a deterministic representation of the context
-  // Only include fields that affect how children are compiled
   const relevantData = {
-    // Ancestry affects how children build their paths
-    ancestry: context.ancestry,
-    // Parameters affect child behavior
-    parameters: context.parameters,
     // Interfaces that children might reference
     interfaces: sortObject(context.interfaces),
     // Constraints that children must follow
     constraints: context.constraints.map((c) => c.rule).sort(),
-    // Suggestions for children
-    suggestions: context.suggestions.map((s) => s.rule).sort(),
     // Utilities available to children
     utilities: context.utilities.map((u) => `${u.name}:${u.signature}`).sort(),
-    // Query filters that might affect children
-    queryFilters: context.queryFilters.map((q) => q.question).sort(),
+    // Forwarding instructions
+    forwarding: context.forwarding,
   };
 
   const json = JSON.stringify(relevantData);
@@ -204,7 +197,7 @@ function sortObject<T extends Record<string, unknown>>(obj: T): T {
  */
 export function hasStructuralChanges(
   node: ASTNode,
-  cachedContext: NodeContext | null
+  cachedContext: ChildContext | null
 ): boolean {
   if (!cachedContext) {
     return true; // No cache, assume changes
@@ -229,8 +222,8 @@ export function hasStructuralChanges(
  * Generate a summary of what changed between old and new context.
  */
 export function summarizeChanges(
-  oldContext: NodeContext | null,
-  newContext: NodeContext
+  oldContext: ChildContext | null,
+  newContext: ChildContext
 ): string[] {
   const changes: string[] = [];
 
