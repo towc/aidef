@@ -12,7 +12,7 @@ typescript/bun;
 
 The core of the aidef is to have a pipeline to take these .aid files into an actionable highly parallelizable plan. We call this plan generation "compilation";
 
-include compiler.aid; # this means the ./compiler.aid file should be read and included here as if at the root level, almost like a string replacement. Anything after a # in a line is a comment
+include compiler.aid;
 
 Once everything is compiled, the developer has the option to inspect the plan and make adjustments to the human .aid files and re-compiling, before executing the plan with the runtime.
 
@@ -23,7 +23,7 @@ cli {
   --run: executes the runtime;
   --analyse {
     looks at the compiled plan, the ai call logs from the compilation (and runtime if already executed), and analyses it to determine the flow of instructions via parseable .gen.aid.map files, similar to javascript source maps, indicating what line of code in the corresponding .aid file came from which line of code of which other file;
-    It also looks at whether there was some miscommunication between parent and child, or whether a node took a long time to reach an answer that could have been reached much more quickly with a small hint, then records it in a .gen.aid.info file, and provides suggestions (recursively based on the .aid.map files) on which original human .aid file should be ammended and how.
+    It also looks at whether there was some miscommunication between parent and child, or whether a node took a long time to reach an answer that could have been reached much more quickly with a small hint, then records it in a .gen.aid.info file (including any questions for the user), and provides suggestions (recursively based on the .aid.map files) on which original human .aid file should be ammended and how.
   }
   --browse {
     a tui tool to inspect the plan files and analysis output, with options to automatically (or manually) implement them.
