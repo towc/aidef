@@ -1,7 +1,7 @@
 /**
  * Compiler Module
  *
- * Exports for the single-node compilation system.
+ * Exports for the compilation system.
  */
 
 export {
@@ -12,30 +12,23 @@ export {
 } from "./compile-node.js";
 
 export {
-  // New context model
   createRootContext,
   buildNodePath,
   mergeContexts,
   isEmptyContext,
   formatContext,
-  // Legacy support (deprecated)
-  createLegacyRootContext,
-  buildChildContext,
 } from "./context-builder.js";
 
 export {
   writeAidgFile,
-  writeAidcFile,
   writeAidqFile,
   readAidgFile,
-  readAidcFile,
   readAidqFile,
 } from "./writer.js";
 
 export {
   diffNode,
-  addCacheMetadata,
-  extractCacheMetadata,
+  createCacheMetadata,
   hashContent,
   hashContext,
   summarizeChanges,

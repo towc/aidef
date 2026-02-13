@@ -10,15 +10,15 @@ import { join } from "node:path";
 
 import {
   diffNode,
-  addCacheMetadata,
-  extractCacheMetadata,
+  createCacheMetadata,
   hashContent,
   hashContext,
   summarizeChanges,
   writeAidgFile,
-  writeAidcFile,
+  writeSourceMap,
+  SourceMapBuilder,
 } from "../../src/compiler";
-import type { ChildContext } from "../../src/types";
+import type { ChildContext, SourceMap } from "../../src/types";
 
 // Test directory in /tmp
 const TEST_DIR = "/tmp/aidef-differ-tests";
@@ -119,35 +119,48 @@ describe("Differ", () => {
     });
   });
 
-  describe("addCacheMetadata / extractCacheMetadata", () => {
-    test("adds cache metadata to context", () => {
-      const context = createMockContext();
-      const withCache = addCacheMetadata(context, "spechash", "ctxhash");
+  describe("createCacheMetadata", () => {
+    test("creates cache metadata with hashes", () => {
+      const cache = createCacheMetadata("spechash", "ctxhash");
 
-      expect(withCache._cache).toBeDefined();
-      expect(withCache._cache.specHash).toBe("spechash");
-      expect(withCache._cache.parentContextHash).toBe("ctxhash");
-      expect(withCache._cache.compiledAt).toBeDefined();
+      expect(cache.specHash).toBe("spechash");
+      expect(cache.parentContextHash).toBe("ctxhash");
+      expect(cache.compiledAt).toBeDefined();
     });
 
-    test("extracts cache metadata from context", () => {
-      const context = createMockContext();
-      const withCache = addCacheMetadata(context, "spechash", "ctxhash");
+    test("includes timestamp", () => {
+      const before = new Date().toISOString();
+      const cache = createCacheMetadata("spec", "ctx");
+      const after = new Date().toISOString();
 
-      const extracted = extractCacheMetadata(withCache);
-      expect(extracted).not.toBeNull();
-      expect(extracted!.specHash).toBe("spechash");
-      expect(extracted!.parentContextHash).toBe("ctxhash");
-    });
-
-    test("returns null for context without cache", () => {
-      const context = createMockContext();
-      const extracted = extractCacheMetadata(context);
-      expect(extracted).toBeNull();
+      expect(cache.compiledAt >= before).toBe(true);
+      expect(cache.compiledAt <= after).toBe(true);
     });
   });
 
   describe("diffNode", () => {
+    /**
+     * Helper to write cached files (aidg + source map with cache).
+     */
+    async function writeCachedFiles(
+      nodePath: string,
+      spec: string,
+      parentContext: ChildContext
+    ): Promise<void> {
+      await writeAidgFile(TEST_DIR, nodePath, spec);
+      
+      const builder = new SourceMapBuilder(`${nodePath}.aidg`);
+      builder.addMapping(1, "test.aid", 1);
+      const sourceMap: SourceMap = {
+        ...builder.build(),
+        cache: createCacheMetadata(
+          hashContent(spec),
+          hashContext(parentContext)
+        ),
+      };
+      await writeSourceMap(TEST_DIR, nodePath, sourceMap);
+    }
+
     test("returns needsRecompile=true when no cache exists", async () => {
       const spec = "server { handles requests }";
       const parentContext = createMockContext();
@@ -164,13 +177,7 @@ describe("Differ", () => {
       const spec2 = "server { new spec }";
 
       // Write initial cached files
-      await writeAidgFile(TEST_DIR, "server", spec1);
-      const context = addCacheMetadata(
-        createMockContext(),
-        hashContent(spec1),
-        hashContext(parentContext)
-      );
-      await writeAidcFile(TEST_DIR, "server", context);
+      await writeCachedFiles("server", spec1, parentContext);
 
       // Diff with new spec
       const result = await diffNode("server", spec2, parentContext, TEST_DIR);
@@ -187,13 +194,7 @@ describe("Differ", () => {
       });
 
       // Write initial cached files
-      await writeAidgFile(TEST_DIR, "server", spec);
-      const context = addCacheMetadata(
-        createMockContext(),
-        hashContent(spec),
-        hashContext(parentContext1)
-      );
-      await writeAidcFile(TEST_DIR, "server", context);
+      await writeCachedFiles("server", spec, parentContext1);
 
       // Diff with new parent context
       const result = await diffNode("server", spec, parentContext2, TEST_DIR);
@@ -207,20 +208,30 @@ describe("Differ", () => {
       const parentContext = createMockContext();
 
       // Write initial cached files
-      await writeAidgFile(TEST_DIR, "server", spec);
-      const context = addCacheMetadata(
-        createMockContext(),
-        hashContent(spec),
-        hashContext(parentContext)
-      );
-      await writeAidcFile(TEST_DIR, "server", context);
+      await writeCachedFiles("server", spec, parentContext);
 
       // Diff with same spec and context
       const result = await diffNode("server", spec, parentContext, TEST_DIR);
 
       expect(result.needsRecompile).toBe(false);
       expect(result.reason).toContain("valid");
-      expect(result.cachedContext).toBeDefined();
+    });
+
+    test("returns needsRecompile=true when source map has no cache metadata", async () => {
+      const spec = "server { same spec }";
+      const parentContext = createMockContext();
+
+      // Write aidg file and source map WITHOUT cache metadata
+      await writeAidgFile(TEST_DIR, "server", spec);
+      const builder = new SourceMapBuilder("server.aidg");
+      builder.addMapping(1, "test.aid", 1);
+      await writeSourceMap(TEST_DIR, "server", builder.build());
+
+      // Diff should detect missing cache
+      const result = await diffNode("server", spec, parentContext, TEST_DIR);
+
+      expect(result.needsRecompile).toBe(true);
+      expect(result.reason).toContain("No cache metadata");
     });
   });
 

@@ -6,8 +6,9 @@
  */
 
 import { createHash } from "node:crypto";
-import type { ChildContext, ASTNode, ModuleNode } from "../types/index.js";
-import { readAidgFile, readAidcFile } from "./writer.js";
+import type { ChildContext, ASTNode, ModuleNode, CacheMetadata } from "../types/index.js";
+import { readAidgFile } from "./writer.js";
+import { readSourceMap } from "./source-map.js";
 
 /**
  * Result of comparing a node's current state to its cached state.
@@ -21,21 +22,11 @@ export interface DiffResult {
   specHash: string;
   /** Hash of the parent context (for caching) */
   contextHash: string;
-  /** Existing cached context (if available and valid) */
-  cachedContext?: ChildContext;
 }
 
-/**
- * Cache entry stored in .aidc files for diffing purposes.
- */
-export interface CacheMetadata {
-  /** Hash of the .aidg spec that produced this context */
-  specHash: string;
-  /** Hash of the parent context used during compilation */
-  parentContextHash: string;
-  /** Timestamp of compilation */
-  compiledAt: string;
-}
+// CacheMetadata is imported from types/index.ts
+// Re-export for consumers
+export type { CacheMetadata } from "../types/index.js";
 
 /**
  * Compare a node's current state to its cached state.
@@ -56,13 +47,13 @@ export async function diffNode(
   const contextHash = hashContext(parentContext);
 
   // Try to read existing cached files
-  const [existingSpec, existingContext] = await Promise.all([
+  const [existingSpec, sourceMap] = await Promise.all([
     readAidgFile(outputDir, nodePath),
-    readAidcFile(outputDir, nodePath),
+    readSourceMap(outputDir, nodePath),
   ]);
 
   // No cached files - needs compilation
-  if (!existingSpec || !existingContext) {
+  if (!existingSpec || !sourceMap) {
     return {
       needsRecompile: true,
       reason: "No cached compilation found",
@@ -79,19 +70,17 @@ export async function diffNode(
       reason: "Spec content has changed",
       specHash,
       contextHash,
-      cachedContext: existingContext,
     };
   }
 
-  // Check if cache metadata exists and matches
-  const cacheMetadata = extractCacheMetadata(existingContext);
+  // Check if cache metadata exists in source map
+  const cacheMetadata = sourceMap.cache;
   if (!cacheMetadata) {
     return {
       needsRecompile: true,
-      reason: "No cache metadata in existing context",
+      reason: "No cache metadata in source map",
       specHash,
       contextHash,
-      cachedContext: existingContext,
     };
   }
 
@@ -102,7 +91,6 @@ export async function diffNode(
       reason: "Parent context has changed",
       specHash,
       contextHash,
-      cachedContext: existingContext,
     };
   }
 
@@ -112,44 +100,25 @@ export async function diffNode(
     reason: "Cached compilation is valid",
     specHash,
     contextHash,
-    cachedContext: existingContext,
   };
 }
 
 /**
- * Add cache metadata to a ChildContext for future diffing.
+ * Create cache metadata for storing in source maps.
  *
- * @param context - The ChildContext to augment
- * @param specHash - Hash of the spec that produced this context
- * @param parentContextHash - Hash of the parent context
- * @returns A new ChildContext with cache metadata
+ * @param specHash - Hash of the spec that produced this output
+ * @param parentContextHash - Hash of the parent context used
+ * @returns CacheMetadata to be stored in source map
  */
-export function addCacheMetadata<T extends ChildContext>(
-  context: T,
+export function createCacheMetadata(
   specHash: string,
   parentContextHash: string
-): T & { _cache: CacheMetadata } {
+): CacheMetadata {
   return {
-    ...context,
-    _cache: {
-      specHash,
-      parentContextHash,
-      compiledAt: new Date().toISOString(),
-    },
+    specHash,
+    parentContextHash,
+    compiledAt: new Date().toISOString(),
   };
-}
-
-/**
- * Extract cache metadata from a ChildContext if present.
- */
-export function extractCacheMetadata(
-  context: ChildContext
-): CacheMetadata | null {
-  const cacheData = (context as ChildContext & { _cache?: CacheMetadata })._cache;
-  if (!cacheData || !cacheData.specHash || !cacheData.parentContextHash) {
-    return null;
-  }
-  return cacheData;
 }
 
 /**

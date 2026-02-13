@@ -197,6 +197,7 @@ export interface SourceOrigin {
 /**
  * Source map for a .aidg file.
  * Follows a simplified version of the JS source map format.
+ * Also stores cache metadata for incremental builds.
  */
 export interface SourceMap {
   /** Version (always 3 for compatibility) */
@@ -207,6 +208,20 @@ export interface SourceMap {
   sources: string[];
   /** Line-by-line mappings */
   mappings: SourceMapping[];
+  /** Cache metadata for incremental builds (optional) */
+  cache?: CacheMetadata;
+}
+
+/**
+ * Cache metadata stored in source maps for incremental builds.
+ */
+export interface CacheMetadata {
+  /** Hash of the .aidg spec that produced this output */
+  specHash: string;
+  /** Hash of the parent context used during compilation */
+  parentContextHash: string;
+  /** Timestamp of compilation */
+  compiledAt: string;
 }
 
 export interface SourceMapping {
@@ -460,42 +475,4 @@ export interface ProviderConfig {
   model?: string;
 }
 
-// =============================================================================
-// Legacy Types (for migration - to be removed)
-// =============================================================================
 
-/**
- * @deprecated Use ChildContext instead. This accumulated all ancestor context.
- */
-export interface NodeContext {
-  module: string;
-  ancestry: string[];
-  parameters: Record<string, string | number>;
-  interfaces: Record<string, {
-    source: string;
-    sourceOrigin?: SourceOrigin;
-    definition: string;
-  }>;
-  constraints: Array<{
-    rule: string;
-    source: string;
-    sourceOrigin?: SourceOrigin;
-  }>;
-  suggestions: Array<{
-    rule: string;
-    source: string;
-    sourceOrigin?: SourceOrigin;
-  }>;
-  utilities: Array<{
-    name: string;
-    signature: string;
-    location: string;
-    source: string;
-    sourceOrigin?: SourceOrigin;
-  }>;
-  queryFilters: Array<{
-    question: string;
-    content: string;
-    sourceOrigin?: SourceOrigin;
-  }>;
-}

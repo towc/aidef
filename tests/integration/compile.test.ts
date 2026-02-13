@@ -26,9 +26,6 @@ import {
   writeAidqFile,
   readAidgFile,
   readAidqFile,
-  // Legacy exports (deprecated)
-  buildChildContext,
-  createLegacyRootContext,
 } from "../../src/compiler";
 import type {
   Provider,
@@ -42,8 +39,6 @@ import type {
   ModuleNode,
   ProseNode,
   ASTNode,
-  // Legacy type (deprecated)
-  NodeContext,
 } from "../../src/types";
 
 // =============================================================================
@@ -253,28 +248,7 @@ function createMockContext(): ChildContext {
   };
 }
 
-/**
- * @deprecated Legacy helper for testing deprecated buildChildContext.
- */
-function createMockLegacyContext(): NodeContext {
-  return {
-    module: "root",
-    ancestry: ["root"],
-    parameters: {},
-    interfaces: {
-      Config: {
-        source: "root",
-        definition: "interface Config { port: number; }",
-      },
-    },
-    constraints: [
-      { rule: "Must be type-safe", source: "root" },
-    ],
-    suggestions: [{ rule: "Use async/await", source: "root" }],
-    utilities: [],
-    queryFilters: [],
-  };
-}
+
 
 // =============================================================================
 // Test Suite
@@ -312,89 +286,6 @@ describe("Compiler Integration", () => {
       // New model has no module, ancestry, parameters, suggestions, queryFilters
       expect(context).not.toHaveProperty("module");
       expect(context).not.toHaveProperty("ancestry");
-    });
-  });
-
-  describe("buildChildContext (LEGACY/DEPRECATED)", () => {
-    // Note: buildChildContext is deprecated. In the new model, CompileResult.children
-    // includes context for each child. These tests exist for backward compatibility.
-
-    test("merges parent context with compile result (legacy)", () => {
-      const parentContext = createMockLegacyContext();
-      const compileResult: CompileResult = {
-        children: [],
-        questions: [],
-        considerations: [],
-        interfaces: [
-          {
-            name: "Handler",
-            definition: "interface Handler { handle(): void; }",
-            source: "server",
-          },
-        ],
-        constraints: [
-          { rule: "Must handle errors", source: "server" },
-        ],
-        utilities: [
-          {
-            name: "logger",
-            signature: "(msg: string) => void",
-            location: "utils/logger.ts",
-            source: "server",
-          },
-        ],
-      };
-
-      const childContext = buildChildContext(
-        parentContext,
-        compileResult,
-        "server"
-      );
-
-      // Check ancestry is extended
-      expect(childContext.ancestry).toEqual(["root", "server"]);
-      expect(childContext.module).toBe("server");
-
-      // Check interfaces are merged
-      expect(childContext.interfaces.Config).toBeDefined();
-      expect(childContext.interfaces.Handler).toBeDefined();
-
-      // Check constraints are merged
-      expect(childContext.constraints).toHaveLength(2);
-      expect(childContext.constraints[0].rule).toBe("Must be type-safe");
-      expect(childContext.constraints[1].rule).toBe("Must handle errors");
-
-      // Check utilities are merged
-      expect(childContext.utilities).toHaveLength(1);
-
-      // Check queryFilters are preserved
-      expect(childContext.queryFilters).toHaveLength(0);
-    });
-
-    test("preserves parent queryFilters (legacy)", () => {
-      const parentContext = createMockLegacyContext();
-      parentContext.queryFilters = [
-        { question: "Is this a database?", content: "Database config" },
-      ];
-
-      const compileResult: CompileResult = {
-        children: [],
-        questions: [],
-        considerations: [],
-        interfaces: [],
-        constraints: [],
-        utilities: [],
-      };
-
-      const childContext = buildChildContext(
-        parentContext,
-        compileResult,
-        "server"
-      );
-
-      // Should preserve parent queryFilters
-      expect(childContext.queryFilters).toHaveLength(1);
-      expect(childContext.queryFilters[0].question).toBe("Is this a database?");
     });
   });
 
