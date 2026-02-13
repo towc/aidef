@@ -2,15 +2,16 @@
 
 ## Overview
 
-AIDef uses four file types plus a call log:
+AIDef uses three file types plus a call log:
 
 | Extension | Format | Purpose | Who creates |
 |-----------|--------|---------|-------------|
 | `.aid` | nginx-like | User source files | User |
-| `.aidg` | nginx-like | Generated/compiled nodes | Compiler |
-| `.aidc` | YAML | Context for nodes | Compiler |
-| `.aidq` | YAML | Questions/uncertainties | Compiler |
+| `.plan.aid` | nginx-like | Generated/compiled nodes | Compiler |
+| `.plan.aid.questions.json` | JSON | Questions/uncertainties | Compiler |
 | `calls.jsonl` | JSONL | AI call log for debugging/benchmarking | Compiler |
+
+**Note:** Context (constraints, suggestions, interfaces, utilities) is passed in-memory from parent to child during compilation. There are no separate context files.
 
 User `.aid` files are committed to version control. Generated files in `.aid-gen/` are gitignored.
 
@@ -264,16 +265,16 @@ Third requirement;
 
 ---
 
-## The `.aidg` File Format (Generated)
+## The `.plan.aid` File Format (Generated)
 
 Generated nodes use the same syntax as `.aid` files:
 - Users can inspect generated specs and understand them
 - Snippets can be copied back to user `.aid` files
 - Same mental model throughout
 
-The difference: `.aidg` files have all imports resolved.
+The difference: `.plan.aid` files have all imports resolved.
 
-Example `.aidg`:
+Example `.plan.aid`:
 
 ```aid
 /*
@@ -295,109 +296,63 @@ middleware {
 
 ---
 
-## The `.aidc` File Format (Context)
+## The `.plan.aid.questions.json` File Format (Questions)
 
-Context files are YAML. They contain information passed from ancestors to children.
+Questions are JSON. They capture uncertainties for human review.
 
-```yaml
-module: server.api
-ancestry:
-  - root
-  - server
-  - api
-
-# Track where each rule originated (for traceability)
-constraints:
-  - rule: TypeScript strict mode
-    sourceOrigin:
-      module: root
-      file: root.aid
-      lines: { start: 5, end: 5 }
-  - rule: validate all inputs with Zod
-    sourceOrigin:
-      module: server
-      file: root.aid
-      lines: { start: 12, end: 12 }
-
-suggestions:
-  - rule: use Hono for routing
-    sourceOrigin:
-      module: server.api
-      file: server.aid
-      lines: { start: 3, end: 3 }
-
-interfaces:
-  ApiResponse:
-    sourceOrigin:
-      module: root
-      file: root.aid
-      lines: { start: 20, end: 25 }
-    definition: |
-      interface ApiResponse<T> {
-        data: T;
-        error?: string;
-      }
-
-utilities:
-  - name: validateRequest
-    signature: "(schema: ZodSchema, req: Request) => Promise<T>"
-    location: utils/validate.ts
-    sourceOrigin:
-      module: server
-      file: server.aid
-      lines: { start: 8, end: 10 }
-```
-
-The `sourceOrigin` field enables full traceability: `build/` file → module → `.aidc` → original `.aid` file and line numbers.
-
----
-
-## The `.aidq` File Format (Questions)
-
-Questions are YAML. They capture uncertainties for human review.
-
-```yaml
-module: auth.session
-
-questions:
-  - id: session-persistence
-    question: Should sessions persist across server restarts?
-    context: The spec doesn't mention persistence requirements.
-    options:
-      - label: In-memory only
-        description: Simpler, sessions lost on restart
-      - label: Redis/database
-        description: Sessions survive restarts
-    assumption: In-memory only
-    impact: Would need to refactor session storage if wrong
-
-  - id: token-expiration
-    question: What should the JWT token expiration be?
-    context: No expiration time specified.
-    options:
-      - label: 1 hour
-      - label: 24 hours
-      - label: 7 days
-    assumption: 24 hours
-    impact: Security and UX implications
-
-considerations:
-  - id: rate-limiting
-    note: Auth module would benefit from rate limiting on login attempts
-    blocking: false
+```json
+{
+  "module": "auth.session",
+  "questions": [
+    {
+      "id": "session-persistence",
+      "question": "Should sessions persist across server restarts?",
+      "context": "The spec doesn't mention persistence requirements.",
+      "options": [
+        { "label": "In-memory only", "description": "Simpler, sessions lost on restart" },
+        { "label": "Redis/database", "description": "Sessions survive restarts" }
+      ],
+      "assumption": "In-memory only",
+      "impact": "Would need to refactor session storage if wrong"
+    },
+    {
+      "id": "token-expiration",
+      "question": "What should the JWT token expiration be?",
+      "context": "No expiration time specified.",
+      "options": [
+        { "label": "1 hour" },
+        { "label": "24 hours" },
+        { "label": "7 days" }
+      ],
+      "assumption": "24 hours",
+      "impact": "Security and UX implications"
+    }
+  ],
+  "considerations": [
+    {
+      "id": "rate-limiting",
+      "note": "Auth module would benefit from rate limiting on login attempts",
+      "blocking": false
+    }
+  ]
+}
 ```
 
 ### Answering Questions
 
-Edit the `.aidq` file directly or use `--browse` mode:
+Edit the `.plan.aid.questions.json` file directly or use `--browse` mode:
 
-```yaml
-questions:
-  - id: session-persistence
-    # ... original fields ...
-    answer: Redis/database
-    answered_by: developer
-    answered_at: 2024-01-15T10:30:00Z
+```json
+{
+  "questions": [
+    {
+      "id": "session-persistence",
+      "answer": "Redis/database",
+      "answered_by": "developer",
+      "answered_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
 ```
 
 ---
@@ -413,20 +368,16 @@ project/
 │   ├── api.aid
 │   └── models.aid
 ├── .aid-gen/                   # Generated output (gitignored)
-│   ├── root.aidg               # Compiled root
-│   ├── root.aidc               # Root context
+│   ├── root.plan.aid                        # Compiled root
 │   ├── server/
-│   │   ├── node.aidg           # Compiled node
-│   │   ├── node.aidc           # Context
-│   │   └── node.aidq           # Questions (if any)
+│   │   ├── node.plan.aid                    # Compiled node
+│   │   └── node.plan.aid.questions.json     # Questions (if any)
 │   └── auth/
-│       ├── node.aidg
-│       ├── node.aidc
-│       └── api/
-│           ├── node.aidg
-│           └── node.aidc
+│       └── node.plan.aid
 └── build/                      # Generated code (gitignored)
 ```
+
+**Note:** Context is passed in-memory during compilation, not stored in files. This enables true parallelization and keeps the output directory clean.
 
 ---
 

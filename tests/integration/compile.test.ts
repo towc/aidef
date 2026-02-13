@@ -22,10 +22,10 @@ import {
   compileRootNode,
   createRootContext,
   buildNodePath,
-  writeAidgFile,
-  writeAidqFile,
-  readAidgFile,
-  readAidqFile,
+  writePlanFile,
+  writeQuestionsFile,
+  readPlanFile,
+  readQuestionsFile,
 } from "../../src/compiler";
 import type {
   Provider,
@@ -307,43 +307,42 @@ describe("Compiler Integration", () => {
   // Writer Tests
   // ===========================================================================
 
-  describe("writeAidgFile / readAidgFile", () => {
-    test("writes and reads .aidg file for root", async () => {
+  describe("writePlanFile / readPlanFile", () => {
+    test("writes and reads .plan.aid file for root", async () => {
       const spec = "server {\n  Handles requests.\n}";
 
-      await writeAidgFile(testDir, "root", spec);
+      await writePlanFile(testDir, "root", spec);
 
-      const filePath = join(testDir, "root.aidg");
+      const filePath = join(testDir, "root.plan.aid");
       expect(existsSync(filePath)).toBe(true);
 
-      const content = await readAidgFile(testDir, "root");
+      const content = await readPlanFile(testDir, "root");
       expect(content).toBe(spec);
     });
 
-    test("writes and reads .aidg file for nested node", async () => {
+    test("writes and reads .plan.aid file for nested node", async () => {
       const spec = "api {\n  REST API endpoints.\n}";
 
-      await writeAidgFile(testDir, "server/api", spec);
+      await writePlanFile(testDir, "server/api", spec);
 
-      const filePath = join(testDir, "server/api/node.aidg");
+      const filePath = join(testDir, "server/api/node.plan.aid");
       expect(existsSync(filePath)).toBe(true);
 
-      const content = await readAidgFile(testDir, "server/api");
+      const content = await readPlanFile(testDir, "server/api");
       expect(content).toBe(spec);
     });
 
     test("returns null for non-existent file", async () => {
-      const content = await readAidgFile(testDir, "nonexistent");
+      const content = await readPlanFile(testDir, "nonexistent");
       expect(content).toBeNull();
     });
   });
 
-  // Note: writeAidcFile / readAidcFile tests removed.
+  // Note: context file tests removed.
   // Context is now passed in-memory from parent to child via ChildSpec.context.
-  // The .aidc file functions still exist for backward compatibility but are deprecated.
 
-  describe("writeAidqFile / readAidqFile", () => {
-    test("writes and reads .aidq file", async () => {
+  describe("writeQuestionsFile / readQuestionsFile", () => {
+    test("writes and reads .plan.aid.questions.json file", async () => {
       const questions: NodeQuestions = {
         module: "server",
         questions: [
@@ -364,20 +363,20 @@ describe("Compiler Integration", () => {
         ],
       };
 
-      await writeAidqFile(testDir, "root", questions);
+      await writeQuestionsFile(testDir, "root", questions);
 
-      const filePath = join(testDir, "root.aidq");
+      const filePath = join(testDir, "root.plan.aid.questions.json");
       expect(existsSync(filePath)).toBe(true);
 
-      const readQuestions = await readAidqFile(testDir, "root");
+      const readQuestions = await readQuestionsFile(testDir, "root");
       expect(readQuestions).not.toBeNull();
       expect(readQuestions!.module).toBe("server");
       expect(readQuestions!.questions).toHaveLength(1);
       expect(readQuestions!.questions[0].question).toBe("What framework?");
     });
 
-    test("returns null for non-existent .aidq file", async () => {
-      const questions = await readAidqFile(testDir, "nonexistent");
+    test("returns null for non-existent .plan.aid.questions.json file", async () => {
+      const questions = await readQuestionsFile(testDir, "nonexistent");
       expect(questions).toBeNull();
     });
   });
@@ -405,16 +404,16 @@ describe("Compiler Integration", () => {
       expect(result.questions).toHaveLength(1);
       expect(result.errors).toHaveLength(0);
 
-      // Check .aidg file was written
-      const spec = await readAidgFile(testDir, "server");
+      // Check .plan.aid file was written
+      const spec = await readPlanFile(testDir, "server");
       expect(spec).not.toBeNull();
       expect(spec).toContain("server");
 
-      // Note: .aidc files are no longer written in the new model
+      // Note: context files are no longer written in the new model
       // Context is passed in-memory via ChildSpec.context
 
-      // Check .aidq file was written (since mock has questions)
-      const questions = await readAidqFile(testDir, "server");
+      // Check .plan.aid.questions.json file was written (since mock has questions)
+      const questions = await readQuestionsFile(testDir, "server");
       expect(questions).not.toBeNull();
       expect(questions!.questions).toHaveLength(1);
     });
@@ -493,11 +492,11 @@ describe("Compiler Integration", () => {
 
       expect(result.nodePath).toBe("root");
 
-      // Check root.aidg was written
-      const spec = await readAidgFile(testDir, "root");
+      // Check root.plan.aid was written
+      const spec = await readPlanFile(testDir, "root");
       expect(spec).not.toBeNull();
 
-      // Note: .aidc files are no longer written in the new model
+      // Note: context files are no longer written in the new model
       // Context is passed in-memory
     });
 
@@ -555,12 +554,12 @@ describe("Compiler Integration", () => {
 
       await compileNode(apiNode, apiContext, provider, testDir);
 
-      // Verify directory structure (.aidg files only, no .aidc)
+      // Verify directory structure (.plan.aid files only, no context files)
       expect(existsSync(join(testDir, "server"))).toBe(true);
-      expect(existsSync(join(testDir, "server/node.aidg"))).toBe(true);
-      // Note: .aidc files are no longer written in the new model
+      expect(existsSync(join(testDir, "server/node.plan.aid"))).toBe(true);
+      // Note: context files are no longer written in the new model
       expect(existsSync(join(testDir, "api"))).toBe(true);
-      expect(existsSync(join(testDir, "api/node.aidg"))).toBe(true);
+      expect(existsSync(join(testDir, "api/node.plan.aid"))).toBe(true);
     });
   });
 });

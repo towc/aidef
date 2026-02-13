@@ -7,7 +7,7 @@
 
 import { createHash } from "node:crypto";
 import type { ChildContext, ASTNode, ModuleNode, CacheMetadata } from "../types/index.js";
-import { readAidgFile } from "./writer.js";
+import { readPlanFile } from "./writer.js";
 import { readSourceMap } from "./source-map.js";
 
 /**
@@ -48,7 +48,7 @@ export async function diffNode(
 
   // Try to read existing cached files
   const [existingSpec, sourceMap] = await Promise.all([
-    readAidgFile(outputDir, nodePath),
+    readPlanFile(outputDir, nodePath),
     readSourceMap(outputDir, nodePath),
   ]);
 

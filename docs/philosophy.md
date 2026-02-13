@@ -235,7 +235,7 @@ This is the whole point of isolation: nodes don't read each other's output, they
 ## Non-Blocking Execution
 
 The system never asks blocking questions during execution. Instead:
-- Uncertainties are logged to `.aidq` files (YAML)
+- Uncertainties are logged to `.plan.aid.questions.json` files (YAML)
 - The developer can review and answer via `--browse` mode
 - Answers are incorporated in subsequent runs
 
@@ -246,12 +246,12 @@ This keeps the pipeline flowing and lets you batch-review decisions.
 | Extension | Purpose |
 |-----------|---------|
 | `.aid` | User source files (committed to git) |
-| `.aidg` | Generated specs in `.aid-gen/` (gitignored) |
-| `.aidg.map` | Source maps for traceability |
-| `.aidq` | Questions for human review |
+| `.plan.aid` | Generated specs in `.aid-gen/` (gitignored) |
+| `.plan.aid.map` | Source maps for traceability |
+| `.plan.aid.questions.json` | Questions for human review |
 | `.aids` | Optimization suggestions (future) |
 
-The `.aidg` files are clean and human-readable. Source maps (`.aidg.map`) track where each line came from without polluting the spec.
+The `.plan.aid` files are clean and human-readable. Source maps (`.plan.aid.map`) track where each line came from without polluting the spec.
 
 ## The Payoffs
 
@@ -269,6 +269,58 @@ The `.aidg` files are clean and human-readable. Source maps (`.aidg.map`) track 
 - You're still writing code (just for a different runtime)
 - Version control, diffs, branches all work normally
 - Familiar patterns: modules, interfaces, dependencies
+
+## Terminology
+
+AIDef follows traditional compiler terminology, adapted for our two-phase architecture:
+
+### Pipeline Overview
+
+```
+Source Code → Parser → AST → Compiler/Planner → Execution Plan → Runtime/Executor → Generated Code
+    .aid                           .plan.aid tree                                         build/
+```
+
+This is analogous to:
+- **PostgreSQL**: Query → Planner → Query Plan → Executor → Results
+- **TypeScript**: .ts → Parser → AST → Compiler → .js
+- **GCC**: .c → Parser → GIMPLE → Optimizer → RTL → Machine Code
+
+### Terms
+
+| Term | Definition | Files |
+|------|------------|-------|
+| **Source Code** | Human-written `.aid` files. First-class code, version-controlled. | `.aid` |
+| **AST** | Abstract Syntax Tree. In-memory parse result. | (memory) |
+| **Execution Plan** | The compiled tree of plan nodes. Cached and reusable. | `.plan.aid` + `.plan.aid.map` |
+| **Plan Node** | A single node in the execution plan (one `.plan.aid` file). | individual `.plan.aid` |
+| **Generator Node** | A leaf plan node that writes files. Part of the plan, but also executes. | leaf `.plan.aid` |
+| **Generated Code** | The output project. Final target of compilation. | `build/*` |
+
+### Roles
+
+| Component | Term | What It Does |
+|-----------|------|--------------|
+| Parser | **Parser** | Converts `.aid` source to AST |
+| Plan Creator | **Compiler** or **Planner** | Transforms AST into execution plan |
+| Plan Executor | **Runtime** or **Executor** | Executes the plan via AI |
+| The AI | **Runtime Engine** | The "CPU" that executes plan nodes |
+
+### Output Contract
+
+Generator nodes (leaf nodes) can only write files in a **1:many** relationship—one generator node produces one or more files. The parent node specifies what files each generator should produce. This is enforced during compilation as a sanity check.
+
+### Analogies
+
+| AIDef | PostgreSQL | GCC | TypeScript |
+|-------|------------|-----|------------|
+| `.aid` | SQL query | `.c` source | `.ts` source |
+| Execution Plan | Query Plan | GIMPLE/RTL | (internal) |
+| Plan Node | Seq Scan, Hash Join | IR instruction | (internal) |
+| Generator Node | Result node | Code emitter | Emitter |
+| Generated Code | Query result | `.o` / binary | `.js` output |
+| Compiler | Query Planner | Front+Middle end | tsc |
+| Runtime | Executor | (N/A - ahead of time) | (N/A) |
 
 ## The Trade-offs
 

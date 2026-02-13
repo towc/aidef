@@ -180,7 +180,7 @@ export type RecognizedParameter = typeof RECOGNIZED_PARAMETERS[number];
 
 /**
  * Tracks the origin of content in the original .aid files.
- * Stored in .aidg.map files (not inline in .aidg).
+ * Stored in .plan.aid.map files (not inline in .plan.aid).
  */
 export interface SourceOrigin {
   /** Module path that defined this (e.g., "root", "server/api") */
@@ -195,14 +195,14 @@ export interface SourceOrigin {
 }
 
 /**
- * Source map for a .aidg file.
+ * Source map for a .plan.aid file.
  * Follows a simplified version of the JS source map format.
  * Also stores cache metadata for incremental builds.
  */
 export interface SourceMap {
   /** Version (always 3 for compatibility) */
   version: 3;
-  /** The .aidg file this maps */
+  /** The .plan.aid file this maps */
   file: string;
   /** Original source files referenced */
   sources: string[];
@@ -216,7 +216,7 @@ export interface SourceMap {
  * Cache metadata stored in source maps for incremental builds.
  */
 export interface CacheMetadata {
-  /** Hash of the .aidg spec that produced this output */
+  /** Hash of the .plan.aid spec that produced this output */
   specHash: string;
   /** Hash of the parent context used during compilation */
   parentContextHash: string;
@@ -225,7 +225,7 @@ export interface CacheMetadata {
 }
 
 export interface SourceMapping {
-  /** Line in the .aidg file (1-indexed) */
+  /** Line in the .plan.aid file (1-indexed) */
   generatedLine: number;
   /** Source file index (into sources array) */
   sourceIndex: number;
@@ -280,7 +280,7 @@ export const EMPTY_CONTEXT: ChildContext = {
 };
 
 // =============================================================================
-// Question Types (.aidq file content)
+// Question Types (.plan.aid.questions.json file content)
 // =============================================================================
 
 export interface NodeQuestions {
@@ -326,7 +326,7 @@ export interface Provider {
 }
 
 export interface CompileRequest {
-  /** The .aidg content for this node */
+  /** The .plan.aid content for this node */
   spec: string;
   /** Context passed from parent (what this node can use) */
   context: ChildContext;
@@ -358,14 +358,14 @@ export interface ChildSpec {
   name: string;
   /** Whether this is a leaf (no further children) */
   isLeaf: boolean;
-  /** The spec content for the child's .aidg */
+  /** The spec content for the child's .plan.aid */
   spec: string;
   /** Context this child receives (from parent) */
   context: ChildContext;
 }
 
 export interface GenerateRequest {
-  /** The .aidg content for this leaf node */
+  /** The .plan.aid content for this leaf node */
   spec: string;
   /** Context passed from parent */
   context: ChildContext;

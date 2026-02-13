@@ -14,7 +14,7 @@ import {
   hashContent,
   hashContext,
   summarizeChanges,
-  writeAidgFile,
+  writePlanFile,
   writeSourceMap,
   SourceMapBuilder,
 } from "../../src/compiler";
@@ -140,16 +140,16 @@ describe("Differ", () => {
 
   describe("diffNode", () => {
     /**
-     * Helper to write cached files (aidg + source map with cache).
+     * Helper to write cached files (plan.aid + source map with cache).
      */
     async function writeCachedFiles(
       nodePath: string,
       spec: string,
       parentContext: ChildContext
     ): Promise<void> {
-      await writeAidgFile(TEST_DIR, nodePath, spec);
+      await writePlanFile(TEST_DIR, nodePath, spec);
       
-      const builder = new SourceMapBuilder(`${nodePath}.aidg`);
+      const builder = new SourceMapBuilder(`${nodePath}.plan.aid`);
       builder.addMapping(1, "test.aid", 1);
       const sourceMap: SourceMap = {
         ...builder.build(),
@@ -221,9 +221,9 @@ describe("Differ", () => {
       const spec = "server { same spec }";
       const parentContext = createMockContext();
 
-      // Write aidg file and source map WITHOUT cache metadata
-      await writeAidgFile(TEST_DIR, "server", spec);
-      const builder = new SourceMapBuilder("server.aidg");
+      // Write plan.aid file and source map WITHOUT cache metadata
+      await writePlanFile(TEST_DIR, "server", spec);
+      const builder = new SourceMapBuilder("server.plan.aid");
       builder.addMapping(1, "test.aid", 1);
       await writeSourceMap(TEST_DIR, "server", builder.build());
 

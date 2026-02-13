@@ -214,15 +214,15 @@ Your task: Implement single-node compilation in `src/compiler/`
 
 Create:
 1. `src/compiler/compile-node.ts` - Compile a single node
-2. `src/compiler/context-builder.ts` - Build .aidc content for children
-3. `src/compiler/writer.ts` - Write .aidg, .aidc, .aidq files to .aid-gen/
+2. `src/compiler/context-builder.ts` - Build context for children (in-memory)
+3. `src/compiler/writer.ts` - Write .plan.aid, .plan.aid.questions.json files to .aid-gen/
 
 The compiler should:
 1. Take a resolved AST node + parent context
 2. Call provider.compile() with the spec
-3. Generate child .aidg files (CSS-like format, same as input)
-4. Generate .aidc file (YAML) with context for children
-5. Generate .aidq file (YAML) if there are questions
+3. Generate child .plan.aid files (CSS-like format, same as input)
+4. Pass context in-memory to children during compilation
+5. Generate .plan.aid.questions.json file (YAML) if there are questions
 6. Log call to calls.jsonl via call-logger
 
 For MVP: Compile root node only, no recursion yet.

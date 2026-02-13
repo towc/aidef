@@ -1,5 +1,19 @@
 # AIDef Implementation TODOs
 
+## Terminology
+
+See `docs/philosophy.md` for full terminology. Quick reference:
+
+| Term | Meaning |
+|------|---------|
+| **Source Code** | Human-written `.aid` files |
+| **Execution Plan** | The compiled `.plan.aid` tree |
+| **Plan Node** | A single `.plan.aid` file |
+| **Generator Node** | A leaf plan node (writes files) |
+| **Generated Code** | Output in `build/` |
+| **Compiler/Planner** | Creates execution plan from source |
+| **Runtime/Executor** | Executes plan via AI |
+
 ## Current State
 
 The MVP foundation is complete. All core components work with nginx-like syntax.
@@ -34,8 +48,8 @@ The MVP foundation is complete. All core components work with nginx-like syntax.
 
 #### Phase 4: Single-Node Compilation ✅
 - [x] Compile one node with provider
-- [x] Generate `.aidg` output
-- [x] Generate `.aidq` output (YAML) for questions
+- [x] Generate `.plan.aid` output
+- [x] Generate `.plan.aid.questions.json` output (YAML) for questions
 - [x] Write to `.aid-gen/`
 
 #### Phase 5: Recursive Compilation ✅
@@ -49,57 +63,41 @@ The MVP foundation is complete. All core components work with nginx-like syntax.
 - [x] Skip unchanged nodes
 - [x] Cache metadata in context
 
+#### Phase 6: Context Model Refactor ✅
+- [x] Remove `.aidc` concept (context passed in-memory)
+- [x] Add `ChildContext` to `ChildSpec`
+- [x] Add source maps (`.plan.aid.map`)
+- [x] Remove `writeAidcFile` / `readAidcFile`
+- [x] Pass context in-memory from parent to child
+- [x] Store cache metadata in source maps
+- [x] Update tests for new model
+
 ---
 
-## Current Phase: Context Encapsulation
+## Current Phase: Build Phase
 
-### Phase 6: Context Model Refactor (Current)
+### Phase 8: Build Phase (Code Generation) - Current
 
-**The Problem**: Current model accumulates ALL ancestor context in `.aidc` files. This is wrong—context should flow strictly parent → child with explicit passing.
+The runtime/executor phase. Generator nodes (leaf plan nodes) are executed by the AI to produce generated code.
 
-**The Solution**: Parent acts as context gateway, deciding what each child receives.
+#### Output Contract
+- Generator nodes write files in a **1:many** relationship
+- Parent specifies what files each generator should produce
+- Enforced during compilation as a sanity check
 
 #### Tasks
-
-- [ ] **Update types**
-  - [ ] Remove `.aidc` concept (context passed in-memory)
-  - [ ] Add `ChildContext` to `ChildSpec` (what parent passes to child)
-  - [ ] Remove `suggestions` from context (that's `.aids`)
-  - [ ] Remove accumulated fields (tags, conventions, etc.)
-
-- [ ] **Add source maps**
-  - [ ] Create `.aidg.map` file format (follow JS source map convention)
-  - [ ] Track which `.aid` file each line came from
-  - [ ] Write source maps during compilation
-
-- [ ] **Update compiler**
-  - [ ] Remove `writeAidcFile` / `readAidcFile`
-  - [ ] Pass context in-memory from parent to child
-  - [ ] Update `compileNode` to receive context as parameter
-  - [ ] Update child compilation to use passed context
-
-- [ ] **Update prompts**
-  - [ ] Emphasize interface-driven design
-  - [ ] Prompt parent to decide per-child context
-  - [ ] Prompt for explicit utility forwarding decisions
-
-- [ ] **Update tests**
-  - [ ] Remove `.aidc` tests
-  - [ ] Add source map tests
-  - [ ] Add context passing tests
-
----
-
-### Phase 8: Build Phase (Code Generation)
-- [ ] Execute leaf nodes
-- [ ] Generate code to `build/`
-- [ ] Parallel leaf execution
-- [ ] Add source module comment header to generated files
+- [ ] Define `GeneratorNode` interface (what a leaf needs to generate)
+- [ ] Implement `executeGenerator()` - AI generates code from leaf spec
+- [ ] Write generated files to `build/`
+- [ ] Add source comment header to generated files (traceability)
+- [ ] Parallel execution of independent generators
+- [ ] Progress reporting during build phase
+- [ ] Handle generation failures gracefully
 
 ### Phase 9: TUI (`--browse`)
 - [ ] Tree view of `.aid-gen/` structure
 - [ ] View node content
-- [ ] View/answer `.aidq` questions
+- [ ] View/answer `.plan.aid.questions.json` questions
 - [ ] View `.aids` suggestions for each module
 - [ ] Apply suggestions
 - [ ] Trigger build
@@ -118,20 +116,10 @@ The MVP foundation is complete. All core components work with nginx-like syntax.
 
 ---
 
-## Context Model
+## Context Model (Implemented)
 
-### Old Model (Wrong)
-```
-Parent compiles → writes .aidc with ALL ancestor context
-Child reads .aidc → sees everything from all ancestors
-```
+Context flows **strictly parent → child**. Parent acts as context gateway.
 
-Problems:
-- Token budgets explode
-- Irrelevant context confuses AI
-- Changes leak across branches
-
-### New Model (Correct)
 ```
 Parent compiles:
   - Decides what EACH child needs
@@ -143,33 +131,14 @@ Child compiles:
   - Has no access to grandparent details (encapsulated)
 ```
 
-### What Parent Passes to Child
+### ChildContext Interface
 
 ```typescript
 interface ChildContext {
-  // What this child must implement
-  interfaces: Record<string, {
-    definition: string;
-    source: string;
-  }>;
-  
-  // Rules this child must follow
-  constraints: Array<{
-    rule: string;
-    source: string;
-  }>;
-  
-  // Utilities this child can use
-  utilities: Array<{
-    name: string;
-    signature: string;
-    location: string;
-  }>;
-  
-  // Instructions for forwarding to grandchildren
-  forwarding?: {
-    utilities: string[];  // Names to forward
-  };
+  interfaces: Record<string, { definition: string; source: string }>;
+  constraints: Array<{ rule: string; source: string }>;
+  utilities: Array<{ name: string; signature: string; location: string }>;
+  forwarding?: { utilities: string[] };
 }
 ```
 
@@ -177,11 +146,10 @@ interface ChildContext {
 
 | File | Purpose |
 |------|---------|
-| `.aidg` | Clean, human-readable spec |
-| `.aidg.map` | Source map for traceability |
-| `.aidq` | Questions for human review |
+| `.plan.aid` | Plan node spec (human-readable) |
+| `.plan.aid.map` | Source map + cache metadata |
+| `.plan.aid.questions.json` | Questions for human review |
 | `.aids` | Suggestions (future) |
-| ~~`.aidc`~~ | **Removed** - context passed in-memory |
 
 ---
 
@@ -255,6 +223,6 @@ Submodules don't have to be direct children—they can exist anywhere in the sub
 ## Testing Strategy
 
 ```bash
-bun test              # unit + integration (179 tests)
+bun test              # unit + integration (176 tests)
 bun test tests/e2e    # real AI calls (manual)
 ```

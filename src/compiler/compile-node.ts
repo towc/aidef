@@ -22,7 +22,7 @@ import type {
   CompileResult,
 } from "../types/index.js";
 import { createRootContext } from "./context-builder.js";
-import { writeAidgFile, writeAidqFile } from "./writer.js";
+import { writePlanFile, writeQuestionsFile } from "./writer.js";
 
 /**
  * Result of compiling a single node.
@@ -60,7 +60,7 @@ export interface CompileOptions {
  * This function:
  * 1. Converts the AST node to a spec string
  * 2. Calls the provider to compile it
- * 3. Writes the .aidg and .aidq files (context is in-memory via ChildSpec.context)
+ * 3. Writes the .plan.aid and .plan.aid.questions.json files (context is in-memory via ChildSpec.context)
  * 4. Returns info about children to compile next
  *
  * In the new model, context flows parent→child. The AI decides what each child
@@ -92,11 +92,11 @@ export async function compileNode(
   // Serialize the node to a spec string
   const spec = serializeNodeToSpec(node);
 
-  // Write the .aidg file (the spec)
+  // Write the .plan.aid file (the spec)
   try {
-    await writeAidgFile(outputDir, nodePath, spec);
+    await writePlanFile(outputDir, nodePath, spec);
   } catch (err) {
-    errors.push(`Failed to write .aidg file for ${nodePath}: ${err}`);
+    errors.push(`Failed to write .plan.aid file for ${nodePath}: ${err}`);
   }
 
   // Check if this is explicitly marked as a leaf
@@ -147,7 +147,7 @@ export async function compileNode(
   // Determine if this is a leaf node based on compile result
   const isLeaf = compileResult.children.length === 0;
 
-  // Write .aidq file if there are questions or considerations
+  // Write .plan.aid.questions.json file if there are questions or considerations
   if (
     compileResult.questions.length > 0 ||
     compileResult.considerations.length > 0
@@ -159,9 +159,9 @@ export async function compileNode(
     };
 
     try {
-      await writeAidqFile(outputDir, nodePath, questions);
+      await writeQuestionsFile(outputDir, nodePath, questions);
     } catch (err) {
-      errors.push(`Failed to write .aidq file for ${nodePath}: ${err}`);
+      errors.push(`Failed to write .plan.aid.questions.json file for ${nodePath}: ${err}`);
     }
   }
 

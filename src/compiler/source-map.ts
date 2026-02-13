@@ -1,7 +1,7 @@
 /**
  * Source Map Support
  *
- * Generates .aidg.map files for traceability.
+ * Generates .plan.aid.map files for traceability.
  * Follows a simplified version of the JS source map format.
  */
 
@@ -130,13 +130,13 @@ export async function readSourceMap(
 }
 
 /**
- * Get the path for a source map file.
+ * Get the path for a source map file (.plan.aid.map).
  */
 function getSourceMapPath(outputDir: string, nodePath: string): string {
   if (nodePath === "root") {
-    return join(outputDir, "root.aidg.map");
+    return join(outputDir, "root.plan.aid.map");
   }
-  return join(outputDir, nodePath, "node.aidg.map");
+  return join(outputDir, nodePath, "node.plan.aid.map");
 }
 
 /**

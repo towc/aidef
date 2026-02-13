@@ -15,10 +15,10 @@ AIDef's core architectural principle: **each compilation agent is sandboxed**. T
 
 | Resource | Description |
 |----------|-------------|
-| `node.aidg` | The compiled specification for this node |
+| `node.plan.aid` | The compiled specification for this node |
 | Context from parent | Interfaces, constraints, utilities passed in-memory |
 | Referenced files | Files explicitly referenced in the spec |
-| Answered questions | Resolved entries from `node.aidq` |
+| Answered questions | Resolved entries from `node.plan.aid.questions.json` |
 
 ### Forbidden (Blacklist)
 
@@ -128,20 +128,20 @@ The parent decides:
 
 ```
 .aid-gen/
-├── root.aidg           # The compiled spec
-├── root.aidg.map       # Source map (where each line came from)
-├── root.aidq           # Questions for human review
+├── root.plan.aid           # The compiled spec
+├── root.plan.aid.map       # Source map (where each line came from)
+├── root.plan.aid.questions.json           # Questions for human review
 ├── server/
-│   ├── node.aidg       # Server module spec
-│   ├── node.aidg.map   # Server source map
+│   ├── node.plan.aid       # Server module spec
+│   ├── node.plan.aid.map   # Server source map
 │   └── api/
-│       ├── node.aidg   # API module spec
-│       └── node.aidg.map
+│       ├── node.plan.aid   # API module spec
+│       └── node.plan.aid.map
 ```
 
 **No `.aidc` files** - context is passed in-memory during compilation, not stored in files.
 
-**Source maps** (`.aidg.map`) track traceability without polluting the readable `.aidg` files.
+**Source maps** (`.plan.aid.map`) track traceability without polluting the readable `.plan.aid` files.
 
 ## Shared Utilities
 
@@ -303,13 +303,13 @@ Each level only knows what its parent passed. `users` has no idea about `BaseSer
 
 ## Source Maps
 
-Source maps track where each piece came from without polluting `.aidg` files:
+Source maps track where each piece came from without polluting `.plan.aid` files:
 
 ```json
-// server/api/node.aidg.map
+// server/api/node.plan.aid.map
 {
   "version": 3,
-  "file": "node.aidg",
+  "file": "node.plan.aid",
   "sources": ["../../../server.aid", "../../../root.aid"],
   "mappings": [
     {"line": 1, "source": "server.aid", "sourceLine": 45},

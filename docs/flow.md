@@ -4,7 +4,7 @@
 
 AIDef operates in two distinct phases:
 
-1. **Compilation Phase**: Parse `.aid` files → generate `.aidg` tree in `.aid-gen/`
+1. **Compilation Phase**: Parse `.aid` files → generate `.plan.aid` tree in `.aid-gen/`
 2. **Build Phase**: Execute leaf nodes → generate code to `build/`
 
 This separation allows developers to inspect the planned changes before committing to inference costs.
@@ -16,9 +16,10 @@ No database—files are the source of truth. Each submodule can run independentl
 | Extension | Format | Purpose |
 |-----------|--------|---------|
 | `.aid` | CSS-like | User source files (committed) |
-| `.aidg` | CSS-like | Generated nodes (gitignored) |
-| `.aidc` | YAML | Context for nodes (gitignored) |
-| `.aidq` | YAML | Questions (gitignored) |
+| `.plan.aid` | CSS-like | Generated nodes (gitignored) |
+| `.plan.aid.questions.json` | JSON | Questions (gitignored) |
+
+**Note**: Context is passed in-memory from parent to child during compilation—there are no context files on disk.
 
 ## Phase 1: Compilation
 
@@ -32,7 +33,7 @@ aid .
 2. Resolve all `@imports` recursively
 3. Parse CSS-like syntax, apply selectors
 4. Generate `.aid-gen/` folder structure
-5. Create `.aidg`, `.aidc`, `.aidq` files for each node
+5. Create `.plan.aid` and `.plan.aid.questions.json` files for each node
 
 ### Import Resolution
 
@@ -55,72 +56,63 @@ Imports are pure text substitution. The result is a single resolved tree.
 For each node in the resolved tree:
 
 ```
-Resolved spec
+Resolved spec + parent context (in-memory)
     │
     ├── [Compilation Agent]
-    │   Reads: spec + parent's .aidc (if exists)
+    │   Reads: spec + parent context (passed in-memory)
     │   Outputs:
-    │     - node.aidg (resolved spec, CSS-like)
-    │     - node.aidc (context for children, YAML)
-    │     - node.aidq (questions, YAML)
+    │     - node.plan.aid (resolved spec, CSS-like)
+    │     - node.plan.aid.questions.json (questions, JSON)
+    │   Passes: child context in-memory to children
     │
     └── [Parallel recursion into children]
 ```
 
 ### Context Flow
 
-The `.aidc` file contains **all context that might be relevant** to children:
+Context is passed **in-memory** from parent to child during compilation. This includes all information that might be relevant to children:
 
-```yaml
-module: server.api
-ancestry: [root, server, api]
-tags: [api, http]
-
-interfaces:
-  ApiResponse:
-    source: root
-    definition: "..."
-
-constraints:
-  - rule: TypeScript strict mode
-    source: root
-    important: true
-
-utilities:
-  - name: validateRequest
-    signature: "..."
-    location: utils/validate.ts
-```
+- Module path and ancestry
+- Tags and metadata
+- Interface definitions
+- Constraints and rules
+- Utility signatures and locations
 
 Before generation, a **context filter agent** decides what subset is actually needed.
+
+This in-memory approach:
+- Enables true parallelization (no file I/O bottlenecks)
+- Maintains agent isolation (children cannot read sibling context)
+- Simplifies the output structure (only `.plan.aid` and `.plan.aid.questions.json` files)
 
 ### Sandboxing Rules
 
 Each compilation agent:
-- **CAN** read: Current spec, current `.aidc`, explicitly referenced files
-- **CANNOT** read: Other `.aid` files, sibling `.aidc`, `.aid-gen/`, `build/`
-- **Outputs**: Child `.aidg` + child `.aidc` + `.aidq`
+- **CAN** read: Current spec, parent context (passed in-memory), explicitly referenced files
+- **CANNOT** read: Other `.aid` files, sibling context, `.aid-gen/`, `build/`
+- **Outputs**: Child `.plan.aid` + `.plan.aid.questions.json`
+- **Passes**: Child context in-memory to children
 
 ### Uncertainty Handling
 
 When an agent encounters ambiguity:
-1. Log to `node.aidq` (YAML format)
+1. Log to `node.plan.aid.questions.json` (JSON format)
 2. Continue with best-effort interpretation
-3. User reviews via `--browse` or edits `.aidq` directly
+3. User reviews via `--browse` or edits `.plan.aid.questions.json` directly
 
 ## Phase 2: Build
 
 ### Triggering Build
 
 After compilation:
-- Review the `.aidg` tree structure
-- Answer questions in `.aidq` files
+- Review the `.plan.aid` tree structure
+- Answer questions in `.plan.aid.questions.json` files
 - Run `aid . --build`
 
 ### Leaf Node Execution
 
 ```
-node.aidg + node.aidc
+node.plan.aid + context (in-memory)
     │
     ├── [Context Filter Agent]
     │   Selects relevant subset of context
@@ -144,7 +136,7 @@ Everything runs in parallel:
 ### Diffing Strategy
 
 1. **Resolve imports**: Get new resolved tree
-2. **Compare**: New vs existing `.aidg` outputs
+2. **Compare**: New vs existing `.plan.aid` outputs
 3. **Interface check**: If identical → skip subtree
 4. **Propagation**: Only affected branches recompile
 
@@ -170,14 +162,14 @@ Resolving imports...
 Compiling root.aid...
   [1/4] Parsing specification
   [2/4] Generating child nodes
-    - server/node.aidg + node.aidc
-    - auth/node.aidg + node.aidc
+    - server/node.plan.aid
+    - auth/node.plan.aid
   [3/4] Recursive compilation...
   [4/4] Done
 
 Questions found:
-  .aid-gen/auth/node.aidq: session persistence?
-  .aid-gen/server/api/node.aidq: rate limits?
+  .aid-gen/auth/node.plan.aid.questions.json: session persistence?
+  .aid-gen/server/api/node.plan.aid.questions.json: rate limits?
 
 Run `aid . --browse` to review.
 Run `aid . --build` to generate code.
@@ -187,8 +179,8 @@ Run `aid . --build` to generate code.
 
 Interactive TUI:
 - Watch compilation progress
-- Browse `.aidg` tree
-- View/answer `.aidq` questions
+- Browse `.plan.aid` tree
+- View/answer `.plan.aid.questions.json` questions
 - Abort early if needed
 - Trigger build
 
@@ -219,18 +211,15 @@ project/
 ```
 project/
 ├── .aid-gen/                   # Compilation output
-│   ├── root.aidg               # Compiled root
+│   ├── root.plan.aid               # Compiled root
 │   ├── server/
-│   │   ├── node.aidg           # CSS-like spec
-│   │   ├── node.aidc           # YAML context
-│   │   ├── node.aidq           # YAML questions
+│   │   ├── node.plan.aid           # CSS-like spec
+│   │   ├── node.plan.aid.questions.json  # JSON questions
 │   │   └── api/
-│   │       ├── node.aidg
-│   │       └── node.aidc
+│   │       └── node.plan.aid
 │   └── auth/
-│       ├── node.aidg
-│       ├── node.aidc
-│       └── node.aidq
+│       ├── node.plan.aid
+│       └── node.plan.aid.questions.json
 └── build/                      # Generated code
     ├── server/
     │   └── api.ts
@@ -238,4 +227,4 @@ project/
         └── index.ts
 ```
 
-Each folder in `.aid-gen/` is independently runnable with its `node.aidg` + `node.aidc`.
+Context is passed in-memory during compilation, so each `.plan.aid` file contains the full resolved spec. The build phase receives context in-memory as well.

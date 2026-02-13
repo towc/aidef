@@ -1,7 +1,7 @@
 /**
  * File Writer
  *
- * Writes .aidg and .aidq files to the .aid-gen/ directory.
+ * Writes .plan.aid and .plan.aid.questions.json files to the .aid-gen/ directory.
  * Uses Bun.file() and Bun.write() for file operations.
  */
 
@@ -10,39 +10,39 @@ import { mkdir } from "node:fs/promises";
 import type { NodeQuestions } from "../types/index.js";
 
 /**
- * Write an .aidg file (spec content).
+ * Write a .plan.aid file (spec content).
  */
-export async function writeAidgFile(
+export async function writePlanFile(
   outputDir: string,
   nodePath: string,
   spec: string
 ): Promise<void> {
-  const filePath = getAidgPath(outputDir, nodePath);
+  const filePath = getPlanPath(outputDir, nodePath);
   await ensureDir(dirname(filePath));
   await Bun.write(filePath, spec);
 }
 
 /**
- * Write an .aidq file (questions/considerations).
+ * Write a .plan.aid.questions.json file (questions/considerations).
  */
-export async function writeAidqFile(
+export async function writeQuestionsFile(
   outputDir: string,
   nodePath: string,
   questions: NodeQuestions
 ): Promise<void> {
-  const filePath = getAidqPath(outputDir, nodePath);
+  const filePath = getQuestionsPath(outputDir, nodePath);
   await ensureDir(dirname(filePath));
   await Bun.write(filePath, JSON.stringify(questions, null, 2));
 }
 
 /**
- * Read an .aidg file.
+ * Read a .plan.aid file.
  */
-export async function readAidgFile(
+export async function readPlanFile(
   outputDir: string,
   nodePath: string
 ): Promise<string | null> {
-  const filePath = getAidgPath(outputDir, nodePath);
+  const filePath = getPlanPath(outputDir, nodePath);
   const file = Bun.file(filePath);
 
   if (!(await file.exists())) {
@@ -53,13 +53,13 @@ export async function readAidgFile(
 }
 
 /**
- * Read an .aidq file.
+ * Read a .plan.aid.questions.json file.
  */
-export async function readAidqFile(
+export async function readQuestionsFile(
   outputDir: string,
   nodePath: string
 ): Promise<NodeQuestions | null> {
-  const filePath = getAidqPath(outputDir, nodePath);
+  const filePath = getQuestionsPath(outputDir, nodePath);
   const file = Bun.file(filePath);
 
   if (!(await file.exists())) {
@@ -75,27 +75,27 @@ export async function readAidqFile(
 // =============================================================================
 
 /**
- * Get the path for an .aidg file.
+ * Get the path for a .plan.aid file.
  *
  * File structure:
- * - root node: .aid-gen/root.aidg
- * - nested nodes: .aid-gen/server/node.aidg, .aid-gen/server/api/node.aidg
+ * - root node: .aid-gen/root.plan.aid
+ * - nested nodes: .aid-gen/server/node.plan.aid, .aid-gen/server/api/node.plan.aid
  */
-function getAidgPath(outputDir: string, nodePath: string): string {
+function getPlanPath(outputDir: string, nodePath: string): string {
   if (nodePath === "root") {
-    return join(outputDir, "root.aidg");
+    return join(outputDir, "root.plan.aid");
   }
-  return join(outputDir, nodePath, "node.aidg");
+  return join(outputDir, nodePath, "node.plan.aid");
 }
 
 /**
- * Get the path for an .aidq file.
+ * Get the path for a .plan.aid.questions.json file.
  */
-function getAidqPath(outputDir: string, nodePath: string): string {
+function getQuestionsPath(outputDir: string, nodePath: string): string {
   if (nodePath === "root") {
-    return join(outputDir, "root.aidq");
+    return join(outputDir, "root.plan.aid.questions.json");
   }
-  return join(outputDir, nodePath, "node.aidq");
+  return join(outputDir, nodePath, "node.plan.aid.questions.json");
 }
 
 // =============================================================================

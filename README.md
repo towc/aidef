@@ -80,15 +80,15 @@ Run:
 aid .
 ```
 
-AIDef compiles to `.aid-gen/` with `.aidg` files. Inspect, approve, then build.
+AIDef compiles to `.aid-gen/` with `.plan.aid` files. Inspect, approve, then build.
 
 ## How It Works
 
-1. **Compilation**: Parse `root.aid` → generate `.aidg` tree in `.aid-gen/`
-2. **Review**: Inspect the tree, answer questions in `.aidq` files
+1. **Compilation**: Parse `root.aid` → generate `.plan.aid` tree in `.aid-gen/`
+2. **Review**: Inspect the tree, answer questions in `.plan.aid.questions.json` files
 3. **Build**: Execute leaf nodes → generate code to `build/`
 
-Each node is isolated—can't read siblings, receives context via `.aidc` files. This enables true parallelization and enforces modularity.
+Each node is isolated—can't read siblings, receives context in-memory from parent. This enables true parallelization and enforces modularity.
 
 ## Installation
 
@@ -120,7 +120,7 @@ Configure with `aid . --auth` or via environment variables.
 - [Philosophy](docs/philosophy.md) - Core concepts, the "programming language for AI" idea
 - [Execution Flow](docs/flow.md) - Compilation and build phases
 - [Performance](docs/performance.md) - Parallelization and caching
-- [File Formats](docs/file-formats.md) - `.aid`, `.aidg`, `.aidc`, `.aidq` specifications
+- [File Formats](docs/file-formats.md) - `.aid`, `.plan.aid`, `.plan.aid.questions.json` specifications
 - [Isolation](docs/isolation.md) - Agent sandboxing
 
 ## Status

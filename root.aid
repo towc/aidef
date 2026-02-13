@@ -3,7 +3,7 @@
   
   This is AIDef's own root.aid, defining itself.
   
-  Compiles .aid files into a tree of .aidg files,
+  Compiles .aid files into a tree of .plan.aid files,
   then builds code from leaf nodes. No database -
   files are the source of truth.
 */
@@ -26,20 +26,14 @@ aid-files {
   strip comments before AI sees content;
 }
 
-aidg-files {
-  // Generated nodes, same nginx-like format
+plan-aid-files {
+  // Generated plan nodes, same nginx-like format
   fully resolved (no imports);
   users can inspect and copy snippets back;
 }
 
-aidc-files {
-  // Context for nodes, YAML format
-  contains all potentially relevant info from ancestors;
-  context filter agent selects relevant subset;
-}
-
-aidq-files {
-  // Questions/uncertainties, YAML format
+plan-aid-questions-files {
+  // Questions/uncertainties, JSON format
   users answer via --browse or direct edit;
 }
 
@@ -70,36 +64,36 @@ parser {
 }
 
 compiler {
-  // Phase 1: generate .aidg tree from root.aid
+  // Phase 1: generate .plan.aid tree from root.aid
   
   reads .aid files, outputs .aid-gen/ folder;
-  each node produces node.aidc with full context;
+  context passed in-memory from parent to child;
   
   compile-node {
     leaf=true;
     serialize AST to spec string;
     call provider to compile;
-    write .aidg, .aidc, .aidq files;
+    write .plan.aid, .plan.aid.questions.json files;
   }
   
   context-builder {
     leaf=true;
-    gather all potentially relevant context;
-    output as node.aidc (YAML);
+    build context for child nodes;
+    pass in-memory (not written to files);
     include: interfaces, constraints, suggestions, utilities;
     annotate where each directive originated;
   }
   
   differ {
     leaf=true;
-    compare new vs existing .aidg outputs;
+    compare new vs existing .plan.aid outputs;
     skip subtrees with identical interfaces;
     use interface hashes for fast comparison;
   }
   
   writer {
     leaf=true;
-    write .aidg, .aidc, .aidq files;
+    write .plan.aid, .plan.aid.questions.json files;
     create directory structure in .aid-gen/;
   }
 }
@@ -109,14 +103,14 @@ generator {
   
   context-filter {
     leaf=true;
-    read node.aidc;
+    receive context in-memory from parent;
     determine relevant subset for this generation;
     apply token budget limits;
   }
   
   executor {
     leaf=true;
-    invoke AI with filtered context + node.aidg;
+    invoke AI with filtered context + node.plan.aid;
     output code to build/ folder;
     add source comment headers;
   }
@@ -135,7 +129,7 @@ cli {
   run {
     leaf=true;
     default mode: compile .aid tree;
-    stream .aidq items as they appear;
+    stream questions as they appear;
     parallel compilation of siblings;
   }
   
@@ -143,8 +137,8 @@ cli {
     leaf=true;
     TUI mode with --browse flag;
     watch compilation progress;
-    browse .aidg tree structure;
-    view and answer .aidq questions inline;
+    browse .plan.aid tree structure;
+    view and answer questions inline;
     abort early if needed;
   }
   
@@ -197,7 +191,7 @@ providers {
 
 questions {
   leaf=true;
-  generate .aidq files (YAML) for uncertainties;
+  generate .plan.aid.questions.json files for uncertainties;
   parse answered questions;
   inject answers into next compilation run;
 }

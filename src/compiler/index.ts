@@ -20,10 +20,10 @@ export {
 } from "./context-builder.js";
 
 export {
-  writeAidgFile,
-  writeAidqFile,
-  readAidgFile,
-  readAidqFile,
+  writePlanFile,
+  writeQuestionsFile,
+  readPlanFile,
+  readQuestionsFile,
 } from "./writer.js";
 
 export {
