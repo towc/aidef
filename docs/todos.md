@@ -66,16 +66,9 @@ Build the deterministic foundation first.
 - [ ] Progress reporting
 
 ### Phase 6: Context Filtering
-- [ ] Layer 1: Deterministic rules
-  - Include `important: true` constraints
-  - Include direct parent interfaces
-  - Include referenced utilities
-  - Trim deep ancestry
-- [ ] Layer 2: Relevance scoring
-  - Keyword matching
-  - Tag intersection
-  - Recency weighting
-- [ ] Token budget enforcement
+- [ ] Pass full `.aidc` to AI (simple approach)
+- [ ] Token budget: trim oldest ancestry first if over limit
+- [ ] Future TODO: Multi-pass regeneration if context missing
 
 ### Phase 7: Diffing & Incremental Builds
 - [ ] Hash interfaces for comparison
@@ -106,12 +99,17 @@ Build the deterministic foundation first.
 ## Design Decisions
 
 ### LLM Provider
-Starting with **Anthropic (Claude)** because:
-- Good at following structured instructions
-- Handles code generation well
-- Familiar to the team
+Using **Vercel AI SDK** (`ai` package) with `@ai-sdk/*` providers:
+- Multi-provider support out of the box
+- Battle-tested, well-maintained
+- Same approach as opencode
 
-Provider abstraction allows easy switching later.
+Starting with:
+- `@ai-sdk/anthropic` (Claude) - primary
+- `@ai-sdk/openai` (GPT) - secondary
+- Consider Ollama for local dev later
+
+Simple wrapper, no complex model database initially.
 
 ### Determinism
 True determinism is impossible with LLMs, but we maximize consistency:
@@ -121,19 +119,33 @@ True determinism is impossible with LLMs, but we maximize consistency:
 - Diffing skips unchanged subtrees
 
 ### Testing Strategy
-- **Unit tests**: Parser, deterministic components (mock AI)
-- **Structure tests**: Validate output shape, not exact content
-- **Snapshot tests**: Catch unintended changes, manual review
-- **Property tests**: Output is valid syntax, references are valid
-- **Eval suite**: Periodic, curated test cases with human review
+
+**Deterministic tests** (run always, no API costs):
+- Unit tests: Lexer, parser, import resolution
+- Mock AI responses for integration tests
+- Located in `tests/unit/` and `tests/integration/`
+
+**Non-deterministic tests** (run manually, requires API keys):
+- Real LLM calls with curated test cases
+- Located in `tests/e2e/`
+- Skipped by default (`bun test` excludes e2e)
+
+```bash
+bun test              # unit + integration only
+bun test tests/e2e    # real AI calls (manual)
+```
 
 ### Context Filtering
-Hybrid approach:
-1. Deterministic rules (always include important constraints, etc.)
-2. Heuristic scoring (keyword match, tag intersection)
-3. LLM filtering (optional, for edge cases)
+Simple approach for MVP:
+1. **Pass everything** up to token limit
+2. Trim oldest ancestry first if over budget
+3. Let the AI figure out relevance
 
-Start with layers 1+2 only.
+Future enhancement (TODO):
+- Multi-pass: generate → check if missing context → regenerate with additions
+- LLM-based filtering for large contexts
+
+No complex heuristics to maintain/debug initially.
 
 ---
 
