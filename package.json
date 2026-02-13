@@ -3,10 +3,21 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "bin": {
+    "aid": "./src/cli/index.ts"
+  },
+  "scripts": {
+    "aid": "bun src/cli/index.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.43",
+    "@ai-sdk/openai": "^3.0.28",
+    "ai": "^6.0.85"
   }
 }
