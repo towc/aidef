@@ -7,6 +7,7 @@ AIDef's core architectural principle: **each compilation agent is sandboxed**. T
 1. **True parallelization**: No shared mutable state between agents
 2. **Reproducibility**: Same inputs always yield same outputs
 3. **Modularity enforcement**: Agents can't "cheat" by reading siblings
+4. **Independent submodules**: Each folder can run as its own project
 
 ## What Each Agent Can Access
 
@@ -14,10 +15,9 @@ AIDef's core architectural principle: **each compilation agent is sandboxed**. T
 
 | Resource | Description |
 |----------|-------------|
-| Current `.aid` file | The specification being processed |
-| Parent context | Text output from parent node (interfaces, signatures) |
-| Explicitly referenced files | Files marked with `@ref` in the `.aid` |
-| Environment variables | Variables marked with `@env` in the `.aid` |
+| `node.aid` | The specification being processed |
+| `node.aidc` | Context file (JSON) with all potentially relevant info from ancestors |
+| Explicitly referenced files | Files referenced in the `.aid` |
 | Answered questions | Resolved `.aiq` entries for this node |
 
 ### Forbidden (Blacklist)
@@ -25,75 +25,125 @@ AIDef's core architectural principle: **each compilation agent is sandboxed**. T
 | Resource | Why |
 |----------|-----|
 | Other `.aid` files | Would break isolation, enable implicit coupling |
+| Sibling `.aidc` files | Siblings are parallel; can't have dependencies |
 | `.aid/` folder contents | Build artifacts shouldn't influence builds |
 | `build/` folder contents | Generated code shouldn't influence generation |
-| Sibling node outputs | Siblings are parallel; can't have dependencies |
-| Grandparent context | Must be explicitly passed through parent |
 
-## Context Passing Mechanism
+## The `.aidc` Context File
 
-### Parent → Child Flow
+Each node receives a `node.aidc` file containing **all context that might be relevant**:
+
+```json
+{
+  "module": "auth",
+  "ancestry": ["root", "server", "auth"],
+  
+  "interfaces": {
+    "User": { "source": "root", "definition": "..." },
+    "AuthService": { "source": "server", "definition": "..." }
+  },
+  
+  "constraints": [
+    { "rule": "TypeScript strict mode", "source": "root", "important": true },
+    { "rule": "use bcrypt", "source": "server.auth", "important": true }
+  ],
+  
+  "conventions": [
+    { "rule": "prefer Bun APIs", "source": "root", "selector": "*" }
+  ],
+  
+  "utilities": [
+    { "name": "hashPassword", "signature": "...", "location": "utils/hash.ts" }
+  ],
+  
+  "tags": ["api", "database"]
+}
+```
+
+### Context Filter Agent
+
+Before generation, a separate agent reads the `.aidc` and decides **what subset is actually relevant** for this specific generation. This keeps prompts focused while preserving full context.
+
+```
+node.aidc (full context)
+    │
+    ├── [Context Filter Agent]
+    │   "This is an auth module. Relevant: User interface, bcrypt constraint."
+    │   "Not relevant: database connection details, UI conventions."
+    │
+    ▼
+Filtered context → Generation Agent
+```
+
+Future: A "skills" system could trigger specific rules based on keywords detected in the spec.
+
+## Context Flow
+
+### Parent → Child
 
 ```
 root.aid
     │
-    │ [Agent compiles root.aid]
+    ├── [Compilation Agent]
+    │   Reads: root.aid
+    │   Outputs: child node.aid + child node.aidc (full context)
     │
     ▼
-┌─────────────────────────────────────┐
-│ Output (text, not files):           │
-│                                     │
-│ interfaces:                         │
-│   AuthService: login, logout        │
-│   UserService: create, findById     │
-│                                     │
-│ utilities:                          │
-│   hashPassword @ utils/hash.ts      │
-│   validateEmail @ utils/validate.ts │
-│                                     │
-│ conventions:                        │
-│   - Use zod for validation          │
-│   - Errors extend BaseError         │
-└─────────────────────────────────────┘
+auth/node.aidc contains:
+  - All interfaces from root
+  - All constraints (with source annotations)
+  - All conventions that might apply
+  - Utilities declared at root level
+
+auth/node.aid + auth/node.aidc
     │
-    ├──────────────────┬──────────────────┐
-    │                  │                  │
-    ▼                  ▼                  ▼
-auth/node.aid    users/node.aid    config.aid
-(receives above) (receives above)  (receives above)
+    ├── [Context Filter] → [Compilation Agent]
+    │
+    ▼
+auth/session/node.aidc contains:
+  - Everything from auth/node.aidc
+  - Plus: interfaces declared in auth
+  - Plus: constraints from auth
 ```
 
-### What Gets Passed
+### What Gets Passed (in `.aidc`)
 
-1. **Interface definitions**: Types, function signatures
-2. **Utility signatures**: What shared utilities exist and where
-3. **Conventions**: Patterns established by ancestors
-4. **Constraints**: `@strict` requirements that apply downstream
+1. **Interface definitions**: Types, function signatures (with source)
+2. **Constraints**: Rules that apply, marked with `important` flag
+3. **Conventions**: Patterns from ancestor selectors (*, .tag, etc.)
+4. **Utilities**: Signatures and locations (not implementations)
+5. **Tags**: What tags apply to this module
+6. **Ancestry**: Full path from root (for debugging)
 
 ### What Doesn't Get Passed
 
 1. **Implementation details**: How things work internally
-2. **Intermediate reasoning**: Why decisions were made
-3. **Sibling information**: What parallel nodes are doing
+2. **Sibling information**: What parallel nodes are doing
+3. **Intermediate reasoning**: Why ancestor decisions were made
 
-## Implementing Shared Utilities
+## Shared Utilities
 
 ### The Challenge
 
 If agents can't read each other's outputs, how do shared utilities work?
 
-### The Solution: Declare, Don't Define
+### The Solution: Declare in `.aidc`, Generate Once
 
-Parent node **declares** the utility interface:
-```
-Utility: hashPassword
-Signature: (plain: string) => Promise<string>
-Location: utils/hash.ts
+Parent declares utility in its output context:
+```json
+{
+  "utilities": [{
+    "name": "hashPassword",
+    "signature": "(plain: string) => Promise<string>",
+    "location": "utils/hash.ts",
+    "source": "root"
+  }]
+}
 ```
 
-Child nodes **use** this declaration without reading the file:
+Children receive this in their `.aidc` and use the signature:
 ```typescript
-// Child knows the signature from parent context
+// Child knows the signature from node.aidc
 import { hashPassword } from '../utils/hash';
 
 async function createUser(password: string) {
@@ -102,100 +152,70 @@ async function createUser(password: string) {
 }
 ```
 
-### Utility Generation
-
-A dedicated leaf node generates the actual utility files:
-```
-.aid/
-├── utils.aid          # Leaf: generates all utility files
-├── auth/
-│   └── node.aid       # Uses utility signatures (doesn't read files)
-└── users/
-    └── node.aid       # Uses utility signatures (doesn't read files)
-```
-
-The build phase ensures `utils.aid` executes before dependents.
+A dedicated leaf node generates the actual utility files.
 
 ## Interface Contracts
 
-### Strict Interface Mode
+### Strict vs. Flexible
 
-When a parent declares an interface, children must honor it:
+Constraints in `.aidc` include an `important` flag:
 
-```aid
-# In parent node.aid
-
-## Interfaces (STRICT)
-
-Children implementing AuthService MUST match this exactly:
-
-```typescript
-interface AuthService {
-  login(email: string, password: string): Promise<Session>;
-  logout(sessionId: string): Promise<void>;
+```json
+{
+  "constraints": [
+    { "rule": "AuthService interface must match exactly", "important": true },
+    { "rule": "Logger interface can be extended", "important": false }
+  ]
 }
 ```
-```
 
-### Flexible Interface Mode
+### Post-Generation Checks (TODO)
 
-For less critical interfaces:
-
-```aid
-## Interfaces (FLEXIBLE)
-
-Children MAY extend this interface:
-
-```typescript
-interface Logger {
-  info(message: string): void;
-  error(message: string, error?: Error): void;
-  // Children may add: debug, warn, etc.
-}
-```
-```
-
-## Enforcement Mechanisms
-
-### Compilation-Time Checks
-
-The compiler verifies:
-1. Child outputs conform to parent-declared interfaces
-2. No forbidden file access patterns in generated code
+After generation, verify:
+1. Outputs conform to declared interfaces
+2. No forbidden file access patterns
 3. Utility imports match declared signatures
 
-### Runtime Sandboxing
-
-During compilation, each agent runs in isolation:
-- Separate process/context
-- File system access restricted to whitelist
-- Network access disabled (AI calls through controlled API)
+This is future work—flag deviations for review rather than blocking.
 
 ## Example: Multi-Level Context Flow
 
 ```
 root.aid
-├── Declares: AppConfig interface
-├── Declares: Logger utility @ utils/logger.ts
+├── node.aidc: (none - this is root)
+├── Outputs to children:
+│   - AppConfig interface
+│   - Logger utility @ utils/logger.ts
 │
-└── services/node.aid (receives: AppConfig, Logger)
-    ├── Declares: BaseService abstract class
-    ├── Declares: validateInput utility @ services/validate.ts
+└── server/
+    ├── node.aid
+    ├── node.aidc: { interfaces: [AppConfig], utilities: [Logger], ... }
+    ├── Outputs to children:
+    │   - BaseService class
+    │   - validateInput utility
     │
-    ├── auth/node.aid (receives: AppConfig, Logger, BaseService, validateInput)
-    │   ├── Declares: AuthService interface
-    │   │
-    │   ├── session.aid (receives: all above + AuthService)
-    │   │   └── Generates: session.ts (implements part of AuthService)
-    │   │
-    │   └── password.aid (receives: all above + AuthService)
-    │       └── Generates: password.ts (implements part of AuthService)
-    │
-    └── users/node.aid (receives: AppConfig, Logger, BaseService, validateInput)
-        └── ...
+    └── auth/
+        ├── node.aid
+        ├── node.aidc: { interfaces: [AppConfig, BaseService], 
+        │                utilities: [Logger, validateInput], ... }
+        ├── Outputs to children:
+        │   - AuthService interface
+        │
+        └── session/
+            ├── node.aid (leaf)
+            ├── node.aidc: { interfaces: [..., AuthService], ... }
+            └── Generates: session.ts
 ```
 
-Each level only passes what children need—no more, no less.
+Each level passes everything that *might* be relevant. The context filter agent at each level decides what actually matters.
+
+## Independent Submodules
+
+Each folder is a complete, runnable unit:
+- `node.aid` - The specification
+- `node.aidc` - All context from ancestors
+
+You can `cd` into any `.aid/` subfolder and run `aid .` to compile just that subtree. The `.aidc` provides all needed context.
 
 ## Anti-Patterns
 
@@ -203,20 +223,18 @@ Each level only passes what children need—no more, no less.
 
 ```aid
 # BAD: Assumes sibling exists
-@module auth
-@module users - needs auth to be compiled first
+@auth { ... }
+@users { needs auth to be compiled first }
 ```
 
 ### Do: Explicit Context
 
 ```aid
 # GOOD: Parent provides what's needed
-## Shared Context for Children
-- AuthService interface (defined above)
-- All children receive this interface
+AuthService interface (defined above) is passed to all children.
 
-@module auth - implements AuthService
-@module users - consumes AuthService
+@auth { implements AuthService }
+@users { consumes AuthService }
 ```
 
 ### Don't: File Path Assumptions
@@ -229,9 +247,8 @@ Import from ../../auth/session.ts
 ### Do: Declared Utilities
 
 ```aid
-# GOOD: Declared in parent
-Utility: getSession @ auth/session.ts
-Children import from declared location
+# GOOD: Declared in parent, received via .aidc
+hashPassword utility @ utils/hash.ts
 ```
 
 ## Debugging Isolation Issues
@@ -240,9 +257,9 @@ Children import from declared location
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Cannot resolve import" | Undeclared utility | Add to parent's utility declarations |
-| "Interface mismatch" | Child diverged from parent | Update child or parent interface |
-| "Forbidden file access" | Tried to read sibling | Pass needed info through parent |
+| "Cannot resolve import" | Undeclared utility | Add to parent's declarations |
+| "Interface mismatch" | Child diverged from parent | Update constraint or implementation |
+| "Missing context" | `.aidc` doesn't include needed info | Parent should include it |
 
 ### Verbose Mode
 
@@ -250,12 +267,17 @@ Children import from declared location
 aid . --verbose
 ```
 
-Shows context passed to each node:
+Shows context for each node:
 ```
-Compiling auth/session.aid
-  Context received:
-    - Interfaces: AuthService, Session
+Compiling auth/session
+  node.aidc contains:
+    - Interfaces: AuthService, Session, User
     - Utilities: hashPassword, validateEmail
-    - Conventions: 3 items
-    - Constraints: 2 @strict requirements
+    - Constraints: 5 (2 important)
+    - Tags: api, auth
+  
+  Context filter selected:
+    - Interfaces: AuthService, Session
+    - Utilities: hashPassword
+    - Constraints: 2 important
 ```

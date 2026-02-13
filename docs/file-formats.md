@@ -2,11 +2,12 @@
 
 ## Overview
 
-AIDef uses two primary file types:
-- **`.aid`** files: AI Definition files containing specifications
-- **`.aiq`** files: AI Questions files containing uncertainties and considerations
+AIDef uses three file types:
+- **`.aid`** files: AI Definition files containing specifications (CSS-like natural language)
+- **`.aidc`** files: AI Definition Context files (JSON, machine-generated)
+- **`.aiq`** files: AI Questions files containing uncertainties (natural language)
 
-Both are plain text, human-readable, and version-control friendly.
+No database—files are the source of truth. Each submodule can run independently with its `node.aid` + `node.aidc`.
 
 ## The `.aid` File Format
 
@@ -292,28 +293,126 @@ Answer: Use Redis. We'll need persistence for horizontal scaling.
 
 On the next run, answered questions inform the AI's decisions.
 
-## File Locations
+## The `.aidc` File Format (Context)
 
-### `.aid` Files
+### Purpose
+
+`.aidc` files contain **all context that might be relevant** to child modules. They're JSON, machine-generated during compilation.
+
+A separate "context filter" agent reads the `.aidc` and decides what subset to actually feed to the generator. This keeps generation focused while preserving full context for edge cases.
+
+### Structure
+
+```json
+{
+  "module": "auth",
+  "parent": "server",
+  "ancestry": ["root", "server", "auth"],
+  
+  "interfaces": {
+    "User": {
+      "source": "root",
+      "definition": "{ id: string, email: string, createdAt: Date }"
+    },
+    "AuthService": {
+      "source": "server",
+      "definition": "{ login(email, password): Promise<Session> }"
+    }
+  },
+  
+  "constraints": [
+    {
+      "rule": "TypeScript strict mode",
+      "source": "root",
+      "important": true
+    },
+    {
+      "rule": "use bcrypt for password hashing",
+      "source": "server.auth",
+      "important": true
+    }
+  ],
+  
+  "conventions": [
+    {
+      "rule": "prefer Bun APIs over Node",
+      "source": "root",
+      "selector": "*"
+    }
+  ],
+  
+  "tags": ["api", "database"],
+  
+  "utilities": [
+    {
+      "name": "hashPassword",
+      "signature": "(plain: string) => Promise<string>",
+      "location": "utils/hash.ts",
+      "source": "server"
+    }
+  ]
+}
+```
+
+### Key Fields
+
+| Field | Purpose |
+|-------|---------|
+| `ancestry` | Full path from root (for debugging/context) |
+| `interfaces` | Type definitions this module should know about |
+| `constraints` | Rules that apply, with source and importance |
+| `conventions` | Style/pattern guidelines from ancestor selectors |
+| `tags` | Tags that apply to this module (for `.tag {}` matching) |
+| `utilities` | Shared utilities available (signatures, not implementations) |
+
+### Context Flow
+
+```
+root.aid
+    │
+    ├── [Compilation] outputs: auth/node.aidc
+    │   Contains: ALL potentially relevant context
+    │
+    ▼
+auth/node.aid + auth/node.aidc
+    │
+    ├── [Context Filter Agent]
+    │   Decides: What's actually relevant for auth generation?
+    │   Future: "Skills" system triggers rules based on keywords
+    │
+    ├── [Generation Agent]
+    │   Receives: node.aid + filtered context
+    │   Outputs: code or child specs
+    │
+    └── [Post-Generation Checks] (TODO)
+        Verify: outputs match declared interfaces
+```
+
+## File Locations
 
 | Location | Purpose |
 |----------|---------|
 | `root.aid` | Your source of truth (you edit this) |
-| `.aid/node.aid` | Copy of root.aid (internal consistency) |
-| `.aid/<task>.aid` | Leaf node (generates code) |
-| `.aid/<task>/node.aid` | Non-leaf node (has children) |
+| `.aid/<name>/node.aid` | Generated submodule spec |
+| `.aid/<name>/node.aidc` | Context from parent (JSON) |
+| `.aid/<name>/node.aiq` | Questions/uncertainties |
+| `build/` | Generated code |
 
-### `.aiq` Files
-
-Live alongside their `.aid` files:
+Each submodule is independently runnable: `node.aid` + `node.aidc` = complete context.
 
 ```
 .aid/
 ├── auth/
-│   ├── node.aid
-│   ├── node.aiq        # Questions about auth module
-│   ├── session.aid
-│   └── session.aiq     # Questions about sessions
+│   ├── node.aid        # Spec for auth module
+│   ├── node.aidc       # Context from parent (JSON)
+│   ├── node.aiq        # Questions about auth
+│   └── session/
+│       ├── node.aid    # Spec for session submodule
+│       ├── node.aidc   # Context from auth (JSON)
+│       └── node.aiq    # Questions about sessions
+└── config/
+    ├── node.aid        # Leaf - generates code directly
+    └── node.aidc       # Context from root
 ```
 
 ## Examples

@@ -1,0 +1,161 @@
+/*
+  AIDef - A programming language where AI is the runtime
+  
+  This is AIDef's own root.aid, defining itself.
+  
+  The tool compiles .aid files into a tree structure,
+  then builds code from leaf nodes. No database - files
+  are the source of truth. Each submodule can run standalone.
+*/
+
+A CLI tool that compiles .aid files into code.
+
+// === Hard requirements ===
+TypeScript strict mode !important
+Bun runtime, not Node !important
+No database - files are the source of truth !important
+Each submodule must be independently runnable !important
+
+// === File types ===
+.aid-file {
+  // CSS-like natural language, user-written or generated
+  parse with awareness of @module, .tag, selectors
+  preserve ``` code blocks as literal prose
+  strip // and /* */ comments before AI sees content
+  warn on bare {} without selector prefix
+}
+
+.aidc-file {
+  // JSON format, machine-generated
+  contains all context that MIGHT be relevant to children
+  a separate agent filters this before feeding to generator
+}
+
+.aiq-file {
+  // natural language, machine-generated
+  questions and uncertainties for human review
+}
+
+// === Core architecture ===
+
+@parser {
+  parse .aid file syntax
+  
+  @lexer {
+    tokenize: selectors, braces, comments, code blocks, prose
+    handle nested structures
+  }
+  
+  @ast {
+    build tree from tokens
+    represent: modules, tags, selectors, rules, prose blocks
+  }
+  
+  @resolver {
+    apply CSS specificity rules
+    merge inherited context
+    resolve :or(), :not(), :has() selectors
+  }
+}
+
+@compiler {
+  // Phase 1: generate .aid tree from root.aid
+  
+  reads root.aid, outputs .aid/ folder structure
+  each node produces node.aidc with full context for children
+  
+  @planner {
+    determine which submodules to create
+    identify leaf vs non-leaf nodes
+    all siblings run in parallel
+  }
+  
+  @context-builder {
+    gather all potentially relevant context
+    output as node.aidc (JSON)
+    include: interfaces, constraints, conventions, ancestry info
+    annotate where each directive originated
+  }
+  
+  @differ {
+    compare new vs existing .aid outputs
+    skip subtrees with identical interfaces
+    use interface hashes for fast comparison
+  }
+}
+
+@generator {
+  // Phase 2: execute leaf nodes to produce code
+  
+  @context-filter {
+    read node.aidc
+    determine what subset is relevant for this specific generation
+    // future: "skills" system triggers rules based on keywords
+  }
+  
+  @executor {
+    invoke AI with filtered context + node.aid
+    output code to build/ folder
+  }
+  
+  @checks {
+    // TODO: post-generation enforcement
+    // verify outputs match declared interfaces
+    // flag deviations for review
+  }
+}
+
+@cli {
+  use Bun.argv for argument parsing
+  
+  @run {
+    default mode: compile .aid tree
+    stream .aiq items as they appear
+  }
+  
+  @browse {
+    TUI mode with --browse flag
+    watch compilation progress
+    browse .aid tree structure  
+    view and answer .aiq questions inline
+    abort early if something looks wrong
+  }
+  
+  @build {
+    --build flag: execute leaf nodes
+    generate code to ./build/
+    only after user approval
+  }
+  
+  @estimate {
+    --estimate flag: show cost estimate
+    count nodes, estimate tokens
+    abort if exceeds --max-cost threshold
+  }
+}
+
+@questions {
+  generate .aiq files for uncertainties
+  parse answered questions from .aiq files
+  inject answers into next compilation run
+}
+
+// === Global conventions ===
+
+:leaf {
+  include unit tests
+  use bun test
+}
+
+* {
+  prefer Bun APIs over Node equivalents
+  Bun.file over fs
+  Bun.serve if HTTP needed
+  Bun.$ for shell commands
+}
+
+.tui {
+  // if we need terminal UI
+  consider ink or blessed
+  keep it simple - just progress and tree view
+}

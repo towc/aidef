@@ -1,5 +1,11 @@
 # AIDef Philosophy
 
+<!-- 
+  TODO: Consider renaming to "Cascading AI" with .cai extension.
+  The CSS parallel is strong: cascading rules, specificity, inheritance.
+  Domain aidef.dev is already owned.
+-->
+
 ## A Programming Language for AI
 
 AIDef is best understood as **a programming language where AI is the runtime**.
