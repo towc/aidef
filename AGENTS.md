@@ -18,8 +18,9 @@ Read these docs to understand the project architecture:
 | `docs/philosophy.md` | Core concepts, design rationale, trade-offs |
 | `docs/flow.md` | Compilation and build phase execution flow |
 | `docs/performance.md` | Parallelization, caching, cost optimization |
-| `docs/file-formats.md` | `.aid` and `.aiq` file specifications |
+| `docs/file-formats.md` | `.aid`, `.aidg`, `.aidc`, `.aidq` specifications |
 | `docs/isolation.md` | Agent sandboxing and context passing |
+| `docs/todos.md` | Implementation phases, decisions, interfaces |
 
 **Session instruction**: If you create new documentation files, add them to this table and briefly describe their purpose.
 
@@ -28,31 +29,36 @@ Read these docs to understand the project architecture:
 ```
 aidef/
 ├── src/
-│   ├── compiler/     # Parses .aid files, calculates diffs, generates tree
-│   ├── tree/         # Manages recursive node structure
+│   ├── parser/       # Lexer, AST, import resolution
+│   ├── compiler/     # Node compilation, context building
+│   ├── generator/    # Code generation from leaf nodes
+│   ├── providers/    # LLM provider adapters
 │   └── cli/          # CLI interface, TUI for --browse mode
 ├── docs/             # Project documentation
 ├── examples/         # Sample .aid files
-├── build/            # Generated output (gitignored)
-└── .aid/             # Compilation artifacts (gitignored)
+├── root.aid          # AIDef's own spec (meta)
+├── .aid-gen/         # Generated compilation output (gitignored)
+└── build/            # Generated code (gitignored)
 ```
 
 ## Key Concepts
 
 ### Two-Phase Architecture
-1. **Compilation**: Parse `root.aid` → generate `.aid` tree (no code files yet)
+1. **Compilation**: Parse `.aid` → generate `.aidg` tree in `.aid-gen/`
 2. **Build**: Execute leaf nodes → generate code to `./build/`
 
-### Agent Isolation
-- Build agents CANNOT read: other `.aid` files, `.aid/` folder, `build/` folder
-- Context passed explicitly from parent → child as text (interfaces, signatures)
-- This enables true parallelization
-
 ### File Types
-- `root.aid` - User's source of truth (committed)
-- `.aid/*.aid` - Compilation artifacts (not committed)
-- `.aiq` - Questions/uncertainties (per-folder)
-- `build/*` - Generated code (not committed)
+| Extension | Format | Purpose |
+|-----------|--------|---------|
+| `.aid` | CSS-like | User source files (committed) |
+| `.aidg` | CSS-like | Generated nodes (gitignored) |
+| `.aidc` | YAML | Context for nodes (gitignored) |
+| `.aidq` | YAML | Questions (gitignored) |
+
+### Agent Isolation
+- Agents CANNOT read: sibling `.aidg`, `.aid-gen/` folder, `build/` folder
+- Context passed via `.aidc` files (YAML)
+- Enables true parallelization
 
 ## Session Rules
 
@@ -70,6 +76,7 @@ aidef/
 - **ALWAYS** ask before deviating from documented architecture
 - **ALWAYS** update `AGENTS.md` when adding new doc files
 - **ALWAYS** keep documentation in sync with implementation
+- **ALWAYS** define interfaces before implementation (enables parallelization)
 
 ## Bun Usage
 
@@ -77,31 +84,30 @@ Default to using Bun instead of Node.js.
 
 - Use `bun <file>` instead of `node <file>` or `ts-node <file>`
 - Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
+- Use `bun install` instead of `npm install`
 - Use `bun run <script>` instead of `npm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
+- Use `bunx <package>` instead of `npx <package>`
 - Bun automatically loads .env, so don't use dotenv.
 
 ### Bun APIs
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- `Bun.$\`ls\`` instead of execa.
+- `Bun.serve()` for HTTP. Don't use `express`.
+- `Bun.file()` for file I/O. Prefer over `node:fs`.
+- `Bun.$\`cmd\`` for shell commands. Don't use `execa`.
+- `bun:sqlite` for SQLite if needed.
 
 ### Testing
 
 Use `bun test` to run tests.
 
 ```ts
-import { test, expect } from "bun:test";
+import { test, expect, describe } from "bun:test";
 
-test("example", () => {
-  expect(1).toBe(1);
+describe("parser", () => {
+  test("tokenizes identifiers", () => {
+    const tokens = tokenize("server { }");
+    expect(tokens[0].type).toBe("identifier");
+  });
 });
 ```
 
@@ -110,11 +116,26 @@ test("example", () => {
 - TypeScript strict mode
 - Prefer functional patterns where appropriate
 - Keep functions small and focused
-- Document public interfaces
+- Document public interfaces with JSDoc
 - Use descriptive variable names
+- Export interfaces separately from implementations
 
 ## Current Development Status
 
-Phase: **Documentation & Planning**
+Phase: **MVP Foundation**
 
-We are establishing the documentation and architecture before writing implementation code. Do not write implementation code until explicitly instructed.
+Current focus: Parser implementation (see `docs/todos.md` Phase 1)
+
+### Implementation Order
+1. Define interfaces first (enables parallel work)
+2. Parser: lexer → AST → imports → selectors
+3. CLI skeleton
+4. Provider abstraction (Anthropic first)
+5. Single-node compilation
+6. Recursive compilation with parallelization
+
+### Testing Strategy
+- Unit tests: Parser, deterministic components (mock AI)
+- Structure tests: Validate output shape
+- Snapshot tests: Catch unintended changes
+- Integration tests: Real AI calls (periodic)
