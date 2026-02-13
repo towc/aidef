@@ -23,16 +23,13 @@ import {
   setCallLogger,
   resetCallLogger,
 } from "../../src/providers";
-import type { CompileRequest, GenerateRequest, NodeContext, CallLogEntry } from "../../src/types";
+import type { CompileRequest, GenerateRequest, ChildContext, CallLogEntry } from "../../src/types";
 
 // =============================================================================
 // Test Fixtures
 // =============================================================================
 
-const mockContext: NodeContext = {
-  module: "server",
-  ancestry: ["root", "server"],
-  tags: ["api", "rest"],
+const mockContext: ChildContext = {
   interfaces: {
     UserData: {
       source: "root",
@@ -40,17 +37,11 @@ const mockContext: NodeContext = {
     },
   },
   constraints: [
-    { rule: "Must validate all inputs", source: "root", important: true },
-    { rule: "Should use async/await", source: "server", important: false },
-  ],
-  suggestions: [
-    { rule: "Consider using dependency injection", source: "root" },
+    { rule: "Must validate all inputs", source: "root" },
+    { rule: "Should use async/await", source: "server" },
   ],
   utilities: [
-    { name: "validateInput", signature: "(data: unknown) => Result", location: "utils/validate.ts", source: "root" },
-  ],
-  conventions: [
-    { rule: "Use camelCase for variables", source: "root", selector: "*" },
+    { name: "validateInput", signature: "(data: unknown) => Result", location: "utils/validate.ts" },
   ],
 };
 
@@ -68,14 +59,14 @@ const mockGenerateRequest: GenerateRequest = {
     A simple logging utility.
     Supports info, warn, error levels.
   }`,
-  context: createEmptyContext("logger"),
+  context: createEmptyContext(),
   nodePath: "server/utils/logger",
 };
 
 const mockCompileResponseJson = JSON.stringify({
   children: [
-    { name: "router", isLeaf: false, spec: "Handles routing logic", tags: ["routing"] },
-    { name: "middleware", isLeaf: true, spec: "Request middleware", tags: ["middleware"] },
+    { name: "router", isLeaf: false, spec: "Handles routing logic" },
+    { name: "middleware", isLeaf: true, spec: "Request middleware" },
   ],
   questions: [
     {
@@ -93,10 +84,7 @@ const mockCompileResponseJson = JSON.stringify({
     { name: "RequestHandler", definition: "type RequestHandler = (req, res) => void", source: "server" },
   ],
   constraints: [
-    { rule: "Must handle errors gracefully", source: "server", important: true },
-  ],
-  suggestions: [
-    { rule: "Consider using middleware pattern", source: "server" },
+    { rule: "Must handle errors gracefully", source: "server" },
   ],
   utilities: [],
 });
@@ -132,7 +120,6 @@ describe("parseCompileResponse", () => {
     expect(result.considerations).toHaveLength(1);
     expect(result.interfaces).toHaveLength(1);
     expect(result.constraints).toHaveLength(1);
-    expect(result.suggestions).toHaveLength(1);
   });
 
   test("parses JSON wrapped in markdown code block", () => {
@@ -200,8 +187,7 @@ describe("buildCompileUserPrompt", () => {
 
   test("includes context information", () => {
     const prompt = buildCompileUserPrompt(mockCompileRequest);
-    expect(prompt).toContain("root > server");
-    expect(prompt).toContain("api, rest");
+    expect(prompt).toContain("UserData");  // Interface from context
   });
 });
 
@@ -222,14 +208,6 @@ describe("buildGenerateUserPrompt", () => {
 // =============================================================================
 
 describe("formatContext", () => {
-  test("formats basic module info", () => {
-    const formatted = formatContext(mockContext);
-    
-    expect(formatted).toContain("Module: server");
-    expect(formatted).toContain("Ancestry: root > server");
-    expect(formatted).toContain("Tags: api, rest");
-  });
-
   test("formats interfaces", () => {
     const formatted = formatContext(mockContext);
     
@@ -238,20 +216,11 @@ describe("formatContext", () => {
     expect(formatted).toContain("interface UserData");
   });
 
-  test("formats constraints with importance", () => {
+  test("formats constraints", () => {
     const formatted = formatContext(mockContext);
     
     expect(formatted).toContain("### Constraints");
-    expect(formatted).toContain("[MUST]");
     expect(formatted).toContain("validate all inputs");
-    expect(formatted).toContain("[SHOULD]");
-  });
-
-  test("formats suggestions", () => {
-    const formatted = formatContext(mockContext);
-    
-    expect(formatted).toContain("### Suggestions");
-    expect(formatted).toContain("dependency injection");
   });
 
   test("formats utilities", () => {
@@ -262,10 +231,10 @@ describe("formatContext", () => {
   });
 
   test("formats empty context without errors", () => {
-    const empty = createEmptyContext("test");
+    const empty = createEmptyContext();
     const formatted = formatContext(empty);
     
-    expect(formatted).toContain("Module: test");
+    expect(formatted).toContain("No specific context provided");
     expect(formatted).not.toContain("### Constraints");
   });
 });
@@ -533,26 +502,11 @@ describe("CallLogger", () => {
 // =============================================================================
 
 describe("createEmptyContext", () => {
-  test("creates context with module name", () => {
-    const ctx = createEmptyContext("myModule");
-    
-    expect(ctx.module).toBe("myModule");
-    expect(ctx.ancestry).toEqual(["myModule"]);
-  });
-
   test("creates empty arrays and objects", () => {
-    const ctx = createEmptyContext("test");
+    const ctx = createEmptyContext();
     
-    expect(ctx.tags).toEqual([]);
     expect(ctx.interfaces).toEqual({});
     expect(ctx.constraints).toEqual([]);
-    expect(ctx.suggestions).toEqual([]);
     expect(ctx.utilities).toEqual([]);
-    expect(ctx.conventions).toEqual([]);
-  });
-
-  test("defaults to 'root' module", () => {
-    const ctx = createEmptyContext();
-    expect(ctx.module).toBe("root");
   });
 });

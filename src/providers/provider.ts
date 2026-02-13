@@ -10,15 +10,15 @@ import type {
   CompileResult,
   GenerateRequest,
   GenerateResult,
-  NodeContext,
+  ChildContext,
   ChildSpec,
   InterfaceDeclaration,
-  Constraint,
-  Suggestion,
+  ConstraintDeclaration,
   UtilityDeclaration,
   NodeQuestions,
   GeneratedFile,
 } from '../types';
+import { EMPTY_CONTEXT } from '../types';
 
 // =============================================================================
 // Prompt Templates
@@ -41,8 +41,7 @@ Output your response as JSON with this exact structure:
     {
       "name": "moduleName",
       "isLeaf": false,
-      "spec": "The specification content for this child module...",
-      "tags": ["tag1", "tag2"]
+      "spec": "The specification content for this child module..."
     }
   ],
   "questions": [
@@ -72,13 +71,6 @@ Output your response as JSON with this exact structure:
   "constraints": [
     {
       "rule": "Must validate all inputs",
-      "source": "module/path",
-      "important": true
-    }
-  ],
-  "suggestions": [
-    {
-      "rule": "Consider using dependency injection",
       "source": "module/path"
     }
   ],
@@ -89,7 +81,7 @@ Rules:
 - If a module is small enough to implement directly, mark isLeaf: true
 - Extract any interfaces that child modules will need to share
 - Note any ambiguities as questions with reasonable assumptions
-- Mark constraints that MUST be followed vs suggestions that SHOULD be considered`;
+- List constraints that must be followed`;
 }
 
 /**
@@ -178,22 +170,14 @@ Generate the implementation code for this leaf module. Return JSON only, no mark
 // =============================================================================
 
 /**
- * Format NodeContext into a readable string for prompts.
+ * Format ChildContext into a readable string for prompts.
  */
-export function formatContext(context: NodeContext): string {
+export function formatContext(context: ChildContext): string {
   const sections: string[] = [];
-  
-  // Module info
-  sections.push(`Module: ${context.module}`);
-  sections.push(`Ancestry: ${context.ancestry.join(' > ')}`);
-  
-  if (context.tags.length > 0) {
-    sections.push(`Tags: ${context.tags.join(', ')}`);
-  }
   
   // Interfaces
   if (Object.keys(context.interfaces).length > 0) {
-    sections.push('\n### Available Interfaces');
+    sections.push('### Available Interfaces');
     for (const [name, info] of Object.entries(context.interfaces)) {
       sections.push(`\n**${name}** (from ${info.source}):`);
       sections.push('```typescript');
@@ -206,16 +190,7 @@ export function formatContext(context: NodeContext): string {
   if (context.constraints.length > 0) {
     sections.push('\n### Constraints');
     for (const c of context.constraints) {
-      const prefix = c.important ? '**[MUST]**' : '[SHOULD]';
-      sections.push(`- ${prefix} ${c.rule} (from ${c.source})`);
-    }
-  }
-  
-  // Suggestions
-  if (context.suggestions.length > 0) {
-    sections.push('\n### Suggestions');
-    for (const s of context.suggestions) {
-      sections.push(`- ${s.rule} (from ${s.source})`);
+      sections.push(`- ${c.rule} (from ${c.source})`);
     }
   }
   
@@ -227,12 +202,8 @@ export function formatContext(context: NodeContext): string {
     }
   }
   
-  // Conventions
-  if (context.conventions.length > 0) {
-    sections.push('\n### Conventions');
-    for (const c of context.conventions) {
-      sections.push(`- ${c.rule} (${c.selector} from ${c.source})`);
-    }
+  if (sections.length === 0) {
+    return 'No specific context provided.';
   }
   
   return sections.join('\n');
@@ -253,7 +224,7 @@ export function parseCompileResponse(output: string): CompileResult {
       name: String(c.name || 'unnamed'),
       isLeaf: Boolean(c.isLeaf),
       spec: String(c.spec || ''),
-      tags: Array.isArray(c.tags) ? c.tags.map(String) : [],
+      context: c.context || EMPTY_CONTEXT,
     })),
     questions: (parsed.questions || []).map((q: any) => ({
       id: String(q.id || `q-${Math.random().toString(36).slice(2, 8)}`),
@@ -273,14 +244,9 @@ export function parseCompileResponse(output: string): CompileResult {
       definition: String(i.definition || ''),
       source: String(i.source || ''),
     })),
-    constraints: (parsed.constraints || []).map((c: any): Constraint => ({
+    constraints: (parsed.constraints || []).map((c: any): ConstraintDeclaration => ({
       rule: String(c.rule || ''),
       source: String(c.source || ''),
-      important: Boolean(c.important),
-    })),
-    suggestions: (parsed.suggestions || []).map((s: any): Suggestion => ({
-      rule: String(s.rule || ''),
-      source: String(s.source || ''),
     })),
     utilities: (parsed.utilities || []).map((u: any): UtilityDeclaration => ({
       name: String(u.name || ''),
@@ -358,19 +324,10 @@ function parseJsonResponse(output: string): any {
 // =============================================================================
 
 /**
- * Create an empty NodeContext for testing or defaults.
+ * Create an empty ChildContext for testing or defaults.
  */
-export function createEmptyContext(module: string = 'root'): NodeContext {
-  return {
-    module,
-    ancestry: [module],
-    tags: [],
-    interfaces: {},
-    constraints: [],
-    suggestions: [],
-    utilities: [],
-    conventions: [],
-  };
+export function createEmptyContext(): ChildContext {
+  return { ...EMPTY_CONTEXT };
 }
 
 // =============================================================================

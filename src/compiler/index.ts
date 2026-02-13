@@ -22,8 +22,10 @@ export {
 export {
   writePlanFile,
   writeQuestionsFile,
+  writeContextFile,
   readPlanFile,
   readQuestionsFile,
+  readContextFile,
 } from "./writer.js";
 
 export {

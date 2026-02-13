@@ -22,7 +22,7 @@ import type {
   CompileResult,
 } from "../types/index.js";
 import { createRootContext } from "./context-builder.js";
-import { writePlanFile, writeQuestionsFile } from "./writer.js";
+import { writePlanFile, writeQuestionsFile, writeContextFile } from "./writer.js";
 
 /**
  * Result of compiling a single node.
@@ -111,6 +111,13 @@ export async function compileNode(
       console.log(`  [leaf] ${nodePath}: Small spec with no children`);
     }
 
+    // Write context file for leaf nodes (needed for build phase)
+    try {
+      await writeContextFile(outputDir, nodePath, context);
+    } catch (err) {
+      errors.push(`Failed to write context file for leaf ${nodePath}: ${err}`);
+    }
+
     return {
       nodePath,
       isLeaf: true,
@@ -146,6 +153,15 @@ export async function compileNode(
 
   // Determine if this is a leaf node based on compile result
   const isLeaf = compileResult.children.length === 0;
+
+  // Write context file for leaf nodes (needed for build phase)
+  if (isLeaf) {
+    try {
+      await writeContextFile(outputDir, nodePath, context);
+    } catch (err) {
+      errors.push(`Failed to write context file for leaf ${nodePath}: ${err}`);
+    }
+  }
 
   // Write .plan.aid.questions.json file if there are questions or considerations
   if (

@@ -1,13 +1,14 @@
 /**
  * File Writer
  *
- * Writes .plan.aid and .plan.aid.questions.json files to the .aid-gen/ directory.
+ * Writes .plan.aid, .plan.aid.questions.json, and .plan.aid.context.json files 
+ * to the .aid-gen/ directory.
  * Uses Bun.file() and Bun.write() for file operations.
  */
 
 import { join, dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
-import type { NodeQuestions } from "../types/index.js";
+import type { NodeQuestions, ChildContext } from "../types/index.js";
 
 /**
  * Write a .plan.aid file (spec content).
@@ -70,6 +71,38 @@ export async function readQuestionsFile(
   return JSON.parse(content) as NodeQuestions;
 }
 
+/**
+ * Write a .plan.aid.context.json file (context for leaf nodes).
+ * Only written for leaf nodes so the build phase can access context.
+ */
+export async function writeContextFile(
+  outputDir: string,
+  nodePath: string,
+  context: ChildContext
+): Promise<void> {
+  const filePath = getContextPath(outputDir, nodePath);
+  await ensureDir(dirname(filePath));
+  await Bun.write(filePath, JSON.stringify(context, null, 2));
+}
+
+/**
+ * Read a .plan.aid.context.json file.
+ */
+export async function readContextFile(
+  outputDir: string,
+  nodePath: string
+): Promise<ChildContext | null> {
+  const filePath = getContextPath(outputDir, nodePath);
+  const file = Bun.file(filePath);
+
+  if (!(await file.exists())) {
+    return null;
+  }
+
+  const content = await file.text();
+  return JSON.parse(content) as ChildContext;
+}
+
 // =============================================================================
 // Path Helpers
 // =============================================================================
@@ -96,6 +129,16 @@ function getQuestionsPath(outputDir: string, nodePath: string): string {
     return join(outputDir, "root.plan.aid.questions.json");
   }
   return join(outputDir, nodePath, "node.plan.aid.questions.json");
+}
+
+/**
+ * Get the path for a .plan.aid.context.json file (leaf nodes only).
+ */
+function getContextPath(outputDir: string, nodePath: string): string {
+  if (nodePath === "root") {
+    return join(outputDir, "root.plan.aid.context.json");
+  }
+  return join(outputDir, nodePath, "node.plan.aid.context.json");
 }
 
 // =============================================================================
