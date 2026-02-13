@@ -3,6 +3,8 @@
  *
  * Tests the compilation flow with MOCKED provider responses.
  * No real API calls are made.
+ * 
+ * Updated for nginx-like syntax.
  */
 
 import {
@@ -58,7 +60,6 @@ function createMockProvider(
         name: "submodule",
         isLeaf: true,
         spec: "A simple submodule that handles data processing.",
-        tags: ["processing"],
       },
     ],
     questions: [
@@ -88,7 +89,6 @@ function createMockProvider(
       {
         rule: "Must validate all input",
         source: "server",
-        important: true,
       },
     ],
     suggestions: [
@@ -149,7 +149,7 @@ function createLeafProvider(): Provider {
 }
 
 // =============================================================================
-// Test Fixtures
+// Test Fixtures (nginx-like syntax)
 // =============================================================================
 
 function createMockRootNode(): RootNode {
@@ -159,7 +159,6 @@ function createMockRootNode(): RootNode {
       {
         type: "prose",
         content: "A server application that handles requests.",
-        important: false,
         source: {
           start: { file: "test.aid", line: 1, column: 1, offset: 0 },
           end: { file: "test.aid", line: 1, column: 40, offset: 40 },
@@ -168,13 +167,11 @@ function createMockRootNode(): RootNode {
       {
         type: "module",
         name: "server",
-        tags: ["api"],
-        pseudos: [],
+        parameters: [],
         children: [
           {
             type: "prose",
             content: "Handles HTTP requests.",
-            important: false,
             source: {
               start: { file: "test.aid", line: 3, column: 3, offset: 50 },
               end: { file: "test.aid", line: 3, column: 25, offset: 72 },
@@ -198,13 +195,21 @@ function createMockModuleNode(): ModuleNode {
   return {
     type: "module",
     name: "server",
-    tags: ["api", "rest"],
-    pseudos: [],
+    parameters: [
+      {
+        type: "parameter",
+        name: "priority",
+        value: 1,
+        source: {
+          start: { file: "test.aid", line: 1, column: 10, offset: 10 },
+          end: { file: "test.aid", line: 1, column: 20, offset: 20 },
+        },
+      },
+    ],
     children: [
       {
         type: "prose",
         content: "A server that handles HTTP requests and routes them.",
-        important: false,
         source: {
           start: { file: "test.aid", line: 2, column: 3, offset: 20 },
           end: { file: "test.aid", line: 2, column: 55, offset: 72 },
@@ -222,7 +227,7 @@ function createMockParentContext(): NodeContext {
   return {
     module: "root",
     ancestry: ["root"],
-    tags: [],
+    parameters: {},
     interfaces: {
       Config: {
         source: "root",
@@ -230,11 +235,11 @@ function createMockParentContext(): NodeContext {
       },
     },
     constraints: [
-      { rule: "Must be type-safe", source: "root", important: true },
+      { rule: "Must be type-safe", source: "root" },
     ],
     suggestions: [{ rule: "Use async/await", source: "root" }],
     utilities: [],
-    conventions: [{ rule: "Use camelCase", source: "root", selector: "*" }],
+    queryFilters: [],
   };
 }
 
@@ -270,12 +275,12 @@ describe("Compiler Integration", () => {
 
       expect(context.module).toBe("root");
       expect(context.ancestry).toEqual(["root"]);
-      expect(context.tags).toEqual([]);
+      expect(context.parameters).toEqual({});
       expect(context.interfaces).toEqual({});
       expect(context.constraints).toEqual([]);
       expect(context.suggestions).toEqual([]);
       expect(context.utilities).toEqual([]);
-      expect(context.conventions).toEqual([]);
+      expect(context.queryFilters).toEqual([]);
     });
   });
 
@@ -294,7 +299,7 @@ describe("Compiler Integration", () => {
           },
         ],
         constraints: [
-          { rule: "Must handle errors", source: "server", important: true },
+          { rule: "Must handle errors", source: "server" },
         ],
         suggestions: [{ rule: "Use middleware", source: "server" }],
         utilities: [
@@ -310,16 +315,12 @@ describe("Compiler Integration", () => {
       const childContext = buildChildContext(
         parentContext,
         compileResult,
-        "server",
-        ["api"]
+        "server"
       );
 
       // Check ancestry is extended
       expect(childContext.ancestry).toEqual(["root", "server"]);
       expect(childContext.module).toBe("server");
-
-      // Check tags are merged
-      expect(childContext.tags).toContain("api");
 
       // Check interfaces are merged
       expect(childContext.interfaces.Config).toBeDefined();
@@ -336,13 +337,15 @@ describe("Compiler Integration", () => {
       // Check utilities are merged
       expect(childContext.utilities).toHaveLength(1);
 
-      // Check conventions are preserved
-      expect(childContext.conventions).toHaveLength(1);
+      // Check queryFilters are preserved
+      expect(childContext.queryFilters).toHaveLength(0);
     });
 
-    test("deduplicates tags", () => {
+    test("preserves parent queryFilters", () => {
       const parentContext = createMockParentContext();
-      parentContext.tags = ["api"];
+      parentContext.queryFilters = [
+        { question: "Is this a database?", content: "Database config" },
+      ];
 
       const compileResult: CompileResult = {
         children: [],
@@ -357,13 +360,12 @@ describe("Compiler Integration", () => {
       const childContext = buildChildContext(
         parentContext,
         compileResult,
-        "server",
-        ["api", "rest"]
+        "server"
       );
 
-      // Should not have duplicate 'api'
-      expect(childContext.tags.filter((t) => t === "api")).toHaveLength(1);
-      expect(childContext.tags).toContain("rest");
+      // Should preserve parent queryFilters
+      expect(childContext.queryFilters).toHaveLength(1);
+      expect(childContext.queryFilters[0].question).toBe("Is this a database?");
     });
   });
 
@@ -435,12 +437,12 @@ describe("Compiler Integration", () => {
       const context: NodeContext = {
         module: "api",
         ancestry: ["root", "server", "api"],
-        tags: ["rest"],
+        parameters: {},
         interfaces: {},
         constraints: [],
         suggestions: [],
         utilities: [],
-        conventions: [],
+        queryFilters: [],
       };
 
       await writeAidcFile(testDir, "server/api", context);
@@ -558,10 +560,6 @@ describe("Compiler Integration", () => {
 
       // Should have parent constraints plus new ones
       expect(context!.constraints.length).toBeGreaterThan(1);
-
-      // Should have merged tags
-      expect(context!.tags).toContain("api");
-      expect(context!.tags).toContain("rest");
     });
 
     test("handles provider errors gracefully", async () => {
@@ -633,18 +631,18 @@ describe("Compiler Integration", () => {
       const serverNode = createMockModuleNode();
       await compileNode(serverNode, parentContext, provider, testDir);
 
-      // Create a child context and compile api node
+      // Read the context that was written
       const serverContext = await readAidcFile(testDir, "server");
+      
+      // Create a child context and compile api node
       const apiNode: ModuleNode = {
         type: "module",
         name: "api",
-        tags: ["rest"],
-        pseudos: [],
+        parameters: [],
         children: [
           {
             type: "prose",
             content: "REST API endpoints.",
-            important: false,
             source: {
               start: { file: "test.aid", line: 1, column: 1, offset: 0 },
               end: { file: "test.aid", line: 1, column: 20, offset: 20 },

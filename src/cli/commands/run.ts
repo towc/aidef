@@ -212,7 +212,6 @@ async function compileChildNode(
       {
         type: "prose",
         content: childSpec.spec,
-        important: false,
         source: {
           start: { file: "generated", line: 1, column: 1, offset: 0 },
           end: { file: "generated", line: 1, column: childSpec.spec.length, offset: childSpec.spec.length },
@@ -230,7 +229,6 @@ async function compileChildNode(
     ...parentContext,
     module: childSpec.name,
     ancestry: [...parentContext.ancestry, childSpec.name],
-    tags: [...new Set([...parentContext.tags, ...childSpec.tags])],
   };
 
   // Compile the child

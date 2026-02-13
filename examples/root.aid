@@ -2,7 +2,7 @@
   Task Manager API
   
   A demo showing how AIDef structures a project.
-  Uses CSS-like syntax for clarity, but plain English works too.
+  Uses nginx-like syntax for clarity.
 */
 
 A simple REST API for managing tasks and projects.
@@ -10,10 +10,10 @@ A simple REST API for managing tasks and projects.
 // Check .env.example for environment variable requirements.
 
 // === Non-negotiable requirements ===
-TypeScript strict mode !important
-All endpoints return JSON with consistent error shapes !important
-Zod for request/response validation !important
-SQLite for persistence !important
+TypeScript strict mode;
+All endpoints return JSON with consistent error shapes;
+Zod for request/response validation;
+SQLite for persistence;
 
 // === Suggestions (flexible) ===
 Drizzle ORM is lightweight and type-safe.
@@ -21,10 +21,10 @@ Standard REST naming conventions.
 Proper HTTP status codes.
 
 // === Shared utilities available to all modules ===
-.shared {
-  AppError: base error class with status code and message
-  validate(): Zod schema wrapper that throws AppError on failure
-  db: database connection singleton
+shared {
+  AppError: base error class with status code and message;
+  validate(): Zod schema wrapper that throws AppError on failure;
+  db: database connection singleton;
 }
 
 // === Module structure ===
@@ -44,32 +44,32 @@ tasks {
 }
 
 health {
-  // Simple leaf module - no sub-modules needed
-  GET /health returns { status: "ok", timestamp }
+  leaf=true;
+  GET /health returns { status: "ok", timestamp };
   Used for monitoring and deployment checks.
 }
 
 config {
-  // Leaf
+  leaf=true;
   Load and validate environment variables.
   Export a typed config object.
 }
 
 errors {
-  // Leaf
+  leaf=true;
   AppError base class, NotFoundError, ValidationError, etc.
   Error handler middleware.
 }
 
 db {
-  // Leaf
+  leaf=true;
   SQLite connection via Drizzle.
   Schema definitions.
   Migration utilities.
 }
 
 server {
-  // Leaf
+  leaf=true;
   Bun.serve() setup.
   Route mounting.
   Middleware chain.

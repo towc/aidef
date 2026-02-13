@@ -3,6 +3,8 @@
  *
  * Compiles a single AST node using an AI provider to generate
  * child specs, context, and questions.
+ * 
+ * Updated for nginx-like syntax.
  */
 
 import type {
@@ -10,6 +12,9 @@ import type {
   ModuleNode,
   RootNode,
   ProseNode,
+  QueryFilterNode,
+  ParameterNode,
+  IncludeNode,
   NodeContext,
   NodeQuestions,
   Provider,
@@ -58,8 +63,8 @@ export async function compileNode(
 ): Promise<CompileNodeResult> {
   const errors: string[] = [];
 
-  // Get node name and tags
-  const { name, tags } = getNodeNameAndTags(node);
+  // Get node name and parameters
+  const { name, parameters } = getNodeNameAndParams(node);
 
   // Build the node path from parent context
   const ancestry = [...parentContext.ancestry];
@@ -71,12 +76,18 @@ export async function compileNode(
   // Serialize the node to a spec string
   const spec = serializeNodeToSpec(node);
 
+  // Merge parameters from this node
+  const mergedParams = {
+    ...parentContext.parameters,
+    ...parameters,
+  };
+
   // Build context for this node (before compilation)
   const nodeContext: NodeContext = {
     ...parentContext,
     module: name,
     ancestry,
-    tags: [...new Set([...parentContext.tags, ...tags])],
+    parameters: mergedParams,
   };
 
   // Write the .aidg file (the spec)
@@ -86,10 +97,13 @@ export async function compileNode(
     errors.push(`Failed to write .aidg file for ${nodePath}: ${err}`);
   }
 
+  // Check if this is explicitly marked as a leaf
+  const isExplicitLeaf = parameters.leaf !== undefined;
+
   // Check if this is already a leaf (no nested module children)
   const hasModuleChildren = hasNestedModules(node);
 
-  if (!hasModuleChildren && isSmallSpec(spec)) {
+  if ((isExplicitLeaf || !hasModuleChildren) && isSmallSpec(spec)) {
     // This is a leaf node - no need to call the provider for compilation
     // Write context and return
     try {
@@ -153,7 +167,6 @@ export async function compileNode(
         ...compileResult.constraints.map((c) => ({
           rule: c.rule,
           source: c.source,
-          important: c.important,
         })),
       ],
       suggestions: [
@@ -177,8 +190,7 @@ export async function compileNode(
     finalContext = buildChildContext(
       parentContext,
       compileResult,
-      name,
-      tags
+      name
     );
   }
 
@@ -235,11 +247,11 @@ export async function compileRootNode(
 }
 
 // =============================================================================
-// Node Serialization
+// Node Serialization (nginx-like syntax)
 // =============================================================================
 
 /**
- * Serialize an AST node back to CSS-like spec format.
+ * Serialize an AST node back to nginx-like spec format.
  */
 function serializeNodeToSpec(node: ASTNode): string {
   switch (node.type) {
@@ -247,18 +259,14 @@ function serializeNodeToSpec(node: ASTNode): string {
       return serializeRootNode(node);
     case "module":
       return serializeModuleNode(node);
+    case "query_filter":
+      return serializeQueryFilterNode(node);
     case "prose":
       return serializeProseNode(node);
-    case "tag_block":
-      return serializeTagBlockNode(node);
-    case "universal_block":
-      return serializeUniversalBlockNode(node);
-    case "pseudo_block":
-      return serializePseudoBlockNode(node);
-    case "import":
-      return `@${node.path}`;
-    case "constraint":
-      return node.content + (node.important ? " !important" : "");
+    case "parameter":
+      return serializeParameterNode(node);
+    case "include":
+      return `include ${node.path};`;
     default:
       return "";
   }
@@ -269,96 +277,56 @@ function serializeRootNode(node: RootNode): string {
 }
 
 function serializeModuleNode(node: ModuleNode): string {
-  // Build selector
-  let selector = node.name;
-
-  // Add tags
-  if (node.tags.length > 0) {
-    selector += node.tags.map((t) => `.${t}`).join("");
+  const parts: string[] = [];
+  
+  // Add parameters inside the block
+  for (const param of node.parameters) {
+    parts.push(`  ${param.name}=${formatParamValue(param.value)};`);
   }
-
-  // Add pseudos
-  for (const pseudo of node.pseudos) {
-    selector += `:${pseudo.name}`;
-    if (pseudo.args && pseudo.args.length > 0) {
-      selector += `(${pseudo.args.join(", ")})`;
+  
+  // Add children
+  for (const child of node.children) {
+    const serialized = serializeNodeToSpec(child);
+    if (serialized) {
+      // Indent each line
+      const indented = serialized
+        .split("\n")
+        .map((line) => (line.trim() ? "  " + line : line))
+        .join("\n");
+      parts.push(indented);
     }
   }
+  
+  const body = parts.join("\n");
+  return `${node.name} {\n${body}\n}`;
+}
 
-  // Add combinator prefix for nested selectors
-  if (node.combinator) {
-    switch (node.combinator) {
-      case "child":
-        selector = "> " + selector;
-        break;
-      case "adjacent":
-        selector = "+ " + selector;
-        break;
-      case "general":
-        selector = "~ " + selector;
-        break;
-      // 'descendant' is implicit (no prefix needed)
-    }
-  }
-
-  // Build body
+function serializeQueryFilterNode(node: QueryFilterNode): string {
   const body = node.children.map(serializeNodeToSpec).filter(Boolean).join("\n");
   const indentedBody = body
     .split("\n")
     .map((line) => (line.trim() ? "  " + line : line))
     .join("\n");
-
-  return `${selector} {\n${indentedBody}\n}`;
+  return `"${escapeString(node.question)}" {\n${indentedBody}\n}`;
 }
 
 function serializeProseNode(node: ProseNode): string {
-  let content = node.content;
-  if (node.important) {
-    content += " !important";
-  }
-  return content;
+  return node.content;
 }
 
-function serializeTagBlockNode(
-  node: ASTNode & { type: "tag_block"; tags: string[]; children: ASTNode[] }
-): string {
-  const selector = node.tags.map((t) => `.${t}`).join("");
-  const body = node.children.map(serializeNodeToSpec).filter(Boolean).join("\n");
-  const indentedBody = body
-    .split("\n")
-    .map((line) => (line.trim() ? "  " + line : line))
-    .join("\n");
-  return `${selector} {\n${indentedBody}\n}`;
+function serializeParameterNode(node: ParameterNode): string {
+  return `${node.name}=${formatParamValue(node.value)};`;
 }
 
-function serializeUniversalBlockNode(
-  node: ASTNode & { type: "universal_block"; children: ASTNode[] }
-): string {
-  const body = node.children.map(serializeNodeToSpec).filter(Boolean).join("\n");
-  const indentedBody = body
-    .split("\n")
-    .map((line) => (line.trim() ? "  " + line : line))
-    .join("\n");
-  return `* {\n${indentedBody}\n}`;
+function formatParamValue(value: string | number): string {
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return `"${escapeString(value)}"`;
 }
 
-function serializePseudoBlockNode(
-  node: ASTNode & {
-    type: "pseudo_block";
-    pseudo: { name: string; args?: string[] };
-    children: ASTNode[];
-  }
-): string {
-  let selector = `:${node.pseudo.name}`;
-  if (node.pseudo.args && node.pseudo.args.length > 0) {
-    selector += `(${node.pseudo.args.join(", ")})`;
-  }
-  const body = node.children.map(serializeNodeToSpec).filter(Boolean).join("\n");
-  const indentedBody = body
-    .split("\n")
-    .map((line) => (line.trim() ? "  " + line : line))
-    .join("\n");
-  return `${selector} {\n${indentedBody}\n}`;
+function escapeString(str: string): string {
+  return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 // =============================================================================
@@ -366,22 +334,26 @@ function serializePseudoBlockNode(
 // =============================================================================
 
 /**
- * Extract name and tags from a node.
+ * Extract name and parameters from a node.
  */
-function getNodeNameAndTags(node: ASTNode): { name: string; tags: string[] } {
+function getNodeNameAndParams(node: ASTNode): {
+  name: string;
+  parameters: Record<string, string | number>;
+} {
   switch (node.type) {
     case "root":
-      return { name: "root", tags: [] };
+      return { name: "root", parameters: {} };
     case "module":
-      return { name: node.name, tags: node.tags };
-    case "tag_block":
-      return { name: node.tags.join("-"), tags: node.tags };
-    case "universal_block":
-      return { name: "universal", tags: [] };
-    case "pseudo_block":
-      return { name: node.pseudo.name, tags: [] };
+      return {
+        name: node.name,
+        parameters: Object.fromEntries(
+          node.parameters.map((p) => [p.name, p.value])
+        ),
+      };
+    case "query_filter":
+      return { name: "query_filter", parameters: {} };
     default:
-      return { name: "unknown", tags: [] };
+      return { name: "unknown", parameters: {} };
   }
 }
 
@@ -395,11 +367,7 @@ function hasNestedModules(node: ASTNode): boolean {
 
   const children = (node as { children: ASTNode[] }).children;
   return children.some(
-    (child) =>
-      child.type === "module" ||
-      child.type === "tag_block" ||
-      child.type === "universal_block" ||
-      child.type === "pseudo_block"
+    (child) => child.type === "module" || child.type === "query_filter"
   );
 }
 

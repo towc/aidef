@@ -3,6 +3,8 @@
  *
  * Builds NodeContext (.aidc content) for child nodes by merging
  * parent context with compile results.
+ * 
+ * Updated for nginx-like syntax.
  */
 
 import type {
@@ -21,12 +23,12 @@ export function createRootContext(rootNode: RootNode): NodeContext {
   return {
     module: "root",
     ancestry: ["root"],
-    tags: [],
+    parameters: {},
     interfaces: {},
     constraints: [],
     suggestions: [],
     utilities: [],
-    conventions: [],
+    queryFilters: [],
   };
 }
 
@@ -36,14 +38,12 @@ export function createRootContext(rootNode: RootNode): NodeContext {
  * @param parentContext - The parent node's context
  * @param compileResult - The compilation result from the provider
  * @param nodeName - The name of the child node
- * @param tags - Tags applied to the child node
  * @returns A new NodeContext for the child
  */
 export function buildChildContext(
   parentContext: NodeContext,
   compileResult: CompileResult,
-  nodeName: string,
-  tags: string[]
+  nodeName: string
 ): NodeContext {
   // Build the child's ancestry by appending the node name
   const ancestry = [...parentContext.ancestry, nodeName];
@@ -63,7 +63,6 @@ export function buildChildContext(
     ...compileResult.constraints.map((c) => ({
       rule: c.rule,
       source: c.source,
-      important: c.important,
     })),
   ];
 
@@ -87,21 +86,21 @@ export function buildChildContext(
     })),
   ];
 
-  // Merge tags: parent tags + node-specific tags (deduplicated)
-  const mergedTags = [...new Set([...parentContext.tags, ...tags])];
+  // Query filters are inherited from parent (could add local ones in the future)
+  const queryFilters = [...parentContext.queryFilters];
 
-  // Conventions are inherited from parent (could be extended in the future)
-  const conventions = [...parentContext.conventions];
+  // Parameters are inherited from parent (child can override in its node)
+  const parameters = { ...parentContext.parameters };
 
   return {
     module: nodeName,
     ancestry,
-    tags: mergedTags,
+    parameters,
     interfaces,
     constraints,
     suggestions,
     utilities,
-    conventions,
+    queryFilters,
   };
 }
 
