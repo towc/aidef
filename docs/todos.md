@@ -1,88 +1,74 @@
 # AIDef Implementation TODOs
 
-## Current Phase: MVP Foundation
+## Current State
 
-### Phase 1: Parser (Current)
-Build the deterministic foundation first.
+The MVP foundation is complete. All core components work with nginx-like syntax.
 
-#### 1.1 Lexer
-- [ ] Tokenize: identifiers, braces, selectors (`.tag`), imports (`@path`)
-- [ ] Handle comments: `/* */` and `//` (strip from output)
-- [ ] Handle code blocks: ``` ` ``` (preserve as literal prose)
-- [ ] Handle `!important` modifier
-- [ ] Line/column tracking for error messages
+### Completed Phases
 
-#### 1.2 AST
-- [ ] Define AST node types
-- [ ] Parse module blocks: `name { }`
-- [ ] Parse tag blocks: `.tag { }`
-- [ ] Parse pseudo-selectors: `:leaf { }`, `:has() { }`
-- [ ] Parse combinators: `parent child`, `parent > child`, etc.
-- [ ] Handle nesting
-- [ ] Prose nodes (content between/outside blocks)
+#### Phase 1: Parser ✅
+- [x] Lexer: identifiers, braces, strings, numbers, semicolons, equals, include keyword
+- [x] Comments: `/* */` and `//` (stripped from output)
+- [x] Code blocks: ``` (preserved as literal prose)
+- [x] Line/column tracking for error messages
+- [x] AST: module blocks `name { }`, query filters `"question?" { }`, parameters, prose
+- [x] Import resolution: `include ./path;` with cycle detection
+- [x] 159 tests passing
 
-#### 1.3 Import Resolution
-- [ ] Resolve `@path` to file content
-- [ ] Support: `@name`, `@./path`, `@./path.aid`, `@url`
-- [ ] Parse imported `.aid` files with selectors
-- [ ] Inline non-`.aid` files as plain prose
-- [ ] Cycle detection
-- [ ] Error on missing files
+#### Phase 2: CLI Skeleton ✅
+- [x] `aid` - entry point, finds root.aid in current directory
+- [x] `aid --help` - usage info
+- [x] `aid --auth` - LLM provider configuration (stub TUI)
+- [x] `aid --browse` - stub (prints "not implemented")
+- [x] `aid --build` - stub
+- [x] `aid --estimate` - stub
+- [x] `aid --verbose` - debug output
 
-#### 1.4 Selector Resolution
-- [ ] Apply CSS specificity rules
-- [ ] Merge rules for same target
-- [ ] Resolve `:or()`, `:not()`, `:has()`
-- [ ] Track rule sources (for `.aidc` annotations)
+#### Phase 3: Provider Abstraction ✅
+- [x] Provider interface definition
+- [x] Anthropic adapter via Vercel AI SDK
+- [x] OpenAI adapter via Vercel AI SDK
+- [x] Config loading: env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+- [x] Connection testing
+- [x] Call logging to `.aid-gen/calls.jsonl`
 
-### Phase 2: CLI Skeleton
-- [ ] `aid .` - entry point, find root.aid
-- [ ] `aid . --help` - usage info
-- [ ] `aid . --auth` - LLM provider configuration TUI
-- [ ] `aid . --browse` - stub (prints "not implemented")
-- [ ] `aid . --build` - stub
-- [ ] `aid . --estimate` - stub
-- [ ] `aid . --verbose` - debug output
+#### Phase 4: Single-Node Compilation ✅
+- [x] Compile one node with provider
+- [x] Generate `.aidg` output
+- [x] Generate `.aidc` output (YAML)
+- [x] Generate `.aidq` output (YAML) for questions
+- [x] Write to `.aid-gen/`
 
-### Phase 3: Provider Abstraction
-- [ ] Provider interface definition
-- [ ] Anthropic adapter (first provider)
-- [ ] Config loading: `.aidrc`, env vars, `~/.config/aid/`
-- [ ] Connection testing in `--auth`
-- [ ] Request/response normalization
-- [ ] Error handling, retries
+#### Phase 5: Recursive Compilation ✅
+- [x] Walk tree, compile each node
+- [x] Pass context from parent to child
+- [x] Parallel execution of siblings
+- [x] Progress reporting
 
-### Phase 4: Single-Node Compilation
-- [ ] Compile one node (no recursion)
-- [ ] Generate `.aidg` output
-- [ ] Generate `.aidc` output (YAML)
-- [ ] Generate `.aidq` output (YAML) for uncertainties
-- [ ] Write to `.aid-gen/`
-- [ ] Log AI call to `.aid-gen/calls.jsonl`
+---
 
-### Phase 5: Recursive Compilation
-- [ ] Walk tree, compile each node
-- [ ] Pass context from parent to child
-- [ ] Parallel execution of siblings
-- [ ] Progress reporting
+## Current Phase: Incremental Builds
 
 ### Phase 6: Context Filtering
-- [ ] Pass full `.aidc` to AI (simple approach)
+Simple approach for MVP:
+- [x] Pass full `.aidc` to AI
 - [ ] Token budget: trim oldest ancestry first if over limit
-- [ ] Track source file origin for each rule in `.aidc` (for TUI suggestions & analysis)
-- [ ] Future TODO: Multi-pass regeneration if context missing
+- [ ] Track source file origin for each rule in `.aidc`
+- [ ] Future: Multi-pass regeneration if context missing
 
-### Phase 7: Diffing & Incremental Builds
+### Phase 7: Diffing & Incremental Builds (Current)
+- [ ] Define interface hash structure
 - [ ] Hash interfaces for comparison
 - [ ] Compare new vs existing `.aidg`
 - [ ] Skip unchanged subtrees
 - [ ] Report what changed
+- [ ] Cache invalidation rules
 
 ### Phase 8: Build Phase (Code Generation)
 - [ ] Execute leaf nodes
 - [ ] Generate code to `build/`
 - [ ] Parallel leaf execution
-- [ ] Post-process generated files: add source module comment header
+- [ ] Add source module comment header to generated files
   - Detect file extension, add appropriate comment syntax
   - Include module path (e.g., `// Generated by: server/api`)
   - Enables traceability: `build/` file → module → `.aidc` → original `.aid` files
@@ -92,7 +78,7 @@ Build the deterministic foundation first.
 - [ ] View node content
 - [ ] View/answer `.aidq` questions
 - [ ] View `.aids` suggestions for each module
-- [ ] Apply suggestions: LLM-generated changes to original `.aid` files at click of a button
+- [ ] Apply suggestions
 - [ ] Trigger build
 - [ ] Abort compilation
 
@@ -102,11 +88,6 @@ Build the deterministic foundation first.
 - [ ] Analyze AI thought process from `calls.jsonl`
 - [ ] Identify shortcuts: where AI iterated or explored multiple options
 - [ ] Suggest additions to original `.aid` files to reduce future compile time/tokens
-- [ ] Track rule origins in `.aidc` (which original `.aid` file each rule came from)
-- [ ] **Open question**: Should analysis be aware of original `.aid` files?
-  - Pro: Can suggest exact edits to specific files
-  - Con: More complexity, coupling between phases
-  - Decision: TBD - start with suggestion text, later add file-targeted edits
 
 ### Phase 11: Polish
 - [ ] `--estimate` implementation
@@ -116,20 +97,71 @@ Build the deterministic foundation first.
 
 ---
 
+## Syntax Reference (nginx-like)
+
+### Hardcoded Patterns
+| Pattern | Meaning |
+|---------|---------|
+| `name { }` | Module block |
+| `"question?" { }` | Query filter block (LLM-evaluated) |
+| `include ./path;` | Import file |
+| `/* */` | Block comment |
+| `//` | Line comment |
+| `;` | Statement terminator |
+
+### Parameters
+Inside blocks: `param="value";` or `param=123;`
+
+Recognized parameters:
+- `leaf="reason"` - don't subdivide this module
+- `never="reason"` - forbid this submodule  
+- `optional="reason"` - may be skipped
+- `priority=1` - compilation order (lower first)
+- `path="./src"` - output path override
+- `model="opus"` - LLM model override
+
+Unrecognized parameters: warning, passed to AI as context.
+
+### Example
+```
+/*
+  Task Manager API
+*/
+
+A simple REST API for managing tasks.
+
+TypeScript strict mode;
+Zod for validation;
+
+shared {
+  AppError: base error class;
+  db: database connection singleton;
+}
+
+server {
+  leaf=true;
+  Bun.serve() setup;
+  Route mounting;
+}
+
+"needs database access?" {
+  Include connection pooling;
+  Handle transactions;
+}
+```
+
+---
+
 ## Design Decisions
 
 ### LLM Provider
 Using **Vercel AI SDK** (`ai` package) with `@ai-sdk/*` providers:
 - Multi-provider support out of the box
 - Battle-tested, well-maintained
-- Same approach as opencode
 
-Starting with:
+Current providers:
 - `@ai-sdk/anthropic` (Claude) - primary
 - `@ai-sdk/openai` (GPT) - secondary
-- Consider Ollama for local dev later
-
-Simple wrapper, no complex model database initially.
 
 ### Determinism
 True determinism is impossible with LLMs, but we maximize consistency:
@@ -148,162 +180,78 @@ True determinism is impossible with LLMs, but we maximize consistency:
 **Non-deterministic tests** (run manually, requires API keys):
 - Real LLM calls with curated test cases
 - Located in `tests/e2e/`
-- Skipped by default (`bun test` excludes e2e)
+- Skipped by default
 
 ```bash
-bun test              # unit + integration only
+bun test              # unit + integration only (159 tests)
 bun test tests/e2e    # real AI calls (manual)
 ```
 
-### Context Filtering
-Simple approach for MVP:
-1. **Pass everything** up to token limit
-2. Trim oldest ancestry first if over budget
-3. Let the AI figure out relevance
-
-Future enhancement (TODO):
-- Multi-pass: generate → check if missing context → regenerate with additions
-- LLM-based filtering for large contexts
-
-No complex heuristics to maintain/debug initially.
+### Submodule Placement
+When specifying a submodule in `.aid` files, it doesn't have to be a direct child - it just needs to exist somewhere in the subtree of the parent with the same semantic meaning. The generator has flexibility in how it structures the actual code hierarchy.
 
 ---
 
-## Interfaces to Define First
+## Interfaces
 
-Before implementation, define these interfaces so work can parallelize:
+### Types (in `src/types/index.ts`)
 
-### `Token` (Lexer output)
-```typescript
-type TokenType = 
-  | 'identifier' | 'brace_open' | 'brace_close'
-  | 'dot' | 'colon' | 'star' | 'import'
-  | 'important' | 'comment' | 'code_block'
-  | 'prose' | 'newline' | 'eof';
-
-interface Token {
-  type: TokenType;
-  value: string;
-  line: number;
-  column: number;
-}
-```
-
-### `ASTNode` (Parser output)
-```typescript
-type ASTNode =
-  | ModuleNode
-  | TagNode
-  | SelectorNode
-  | ProseNode
-  | ImportNode;
-
-interface ModuleNode {
-  type: 'module';
-  name: string;
-  children: ASTNode[];
-  source: SourceLocation;
-}
-// ... etc
-```
-
-### `ResolvedSpec` (After import resolution)
-```typescript
-interface ResolvedSpec {
-  ast: ASTNode;
-  imports: Map<string, ResolvedSpec>;
-  sources: SourceMap; // for error reporting
-}
-```
-
-### `CompiledNode` (Compilation output)
-```typescript
-interface CompiledNode {
-  name: string;
-  ancestry: string[];
-  prose: string;
-  children: string[]; // names only
-  interfaces: InterfaceDeclaration[];
-  constraints: Constraint[];
-  utilities: UtilityDeclaration[];
-  tags: string[];
-}
-```
-
-### `Provider` (LLM abstraction)
-```typescript
-interface Provider {
-  name: string;
-  compile(spec: string, context: FilteredContext): Promise<CompilationResult>;
-  generate(spec: string, context: FilteredContext): Promise<GenerationResult>;
-  testConnection(): Promise<boolean>;
-}
-```
-
-### `CallLog` (AI call tracking)
-```typescript
-interface CallLogEntry {
-  id: string;                    // unique call ID
-  timestamp: string;             // ISO 8601
-  node: string;                  // e.g. "root" or "server/api"
-  phase: 'compile' | 'generate'; // which phase
-  provider: string;              // e.g. "anthropic"
-  model: string;                 // e.g. "claude-sonnet-4-20250514"
-  
-  // Full content for inspection
-  input: string;                 // full prompt sent
-  output: string;                // full response received
-  
-  // Metrics
-  input_tokens: number;
-  output_tokens: number;
-  duration_ms: number;
-  
-  success: boolean;
-  error?: string;                // if failed
-}
-
-// Written to .aid-gen/calls.jsonl, one JSON object per line
-// Can get large - consider rotation/cleanup for long-running projects
-```
+Key types for nginx-like syntax:
+- `Token`, `TokenType` - Lexer output
+- `ModuleNode`, `QueryFilterNode`, `ProseNode`, `ParameterNode`, `IncludeNode` - AST nodes
+- `NodeContext` - Context passed to children (`.aidc` content)
+- `Provider`, `CompileRequest`, `CompileResult` - LLM abstraction
+- `CallLogEntry` - AI call tracking
 
 ---
 
-## Questions to Resolve
+## Questions Resolved
 
-1. **Selector syntax edge cases**: What happens with `name.tag.tag2:has(child) { }`? 
-   - **Decision**: Follow CSS precedence. Parse left-to-right, pseudo-selectors bind to preceding selector.
-   - `name.tag.tag2:has(child)` = module `name` with tags `tag`, `tag2`, containing `child`
+1. **Module names cannot have spaces** - simplifies parsing, use hyphens instead (`email-service`)
 
-2. **Import scoping**: When `@file` is inside a block, does it inherit the block's selector context?
-   - **Decision**: Yes. `server { @./db }` means db.aid content is scoped under `server`.
-   - The imported content becomes children of the containing block.
+2. **Import scoping**: `include` inside a block scopes content under that block
 
-3. **Error recovery**: Should parser continue after errors? Collect multiple errors?
-   - **Decision**: Yes, collect multiple errors. Better DX to see all issues at once.
-   - Use "panic mode" recovery: skip to next `}` or block boundary.
+3. **Error recovery**: Collect multiple errors, continue parsing
 
-4. **Streaming**: Should compilation stream progress, or wait for complete output?
-   - **Decision**: Stream. Show progress as nodes complete.
-   - Important for `--browse` TUI and cost control (abort early).
+4. **Streaming**: Stream progress as nodes complete
 
-5. **`.aids` suggestion files**: How to track and present optimization suggestions?
-   - **Context**: After compilation, `--analyze` examines AI thought process and identifies
-     places where explicit guidance would have saved time/tokens.
-   - **Example**: A UI design submodule spent 30 minutes iterating through options because
-     constraints weren't clear upfront. Analysis suggests: "Add to ui.aid: 'use Tailwind, no
-     custom CSS' to avoid exploration phase."
-   - **Format**: TBD - likely YAML with suggested additions and target file paths
-   - **TUI integration**: `--browse` shows suggestions per module, one-click to apply
-     (LLM generates the actual `.aid` file edit)
-   - **Source tracking**: `.aidc` must track which original `.aid` file each rule came from,
-     so suggestions can target the right file.
+5. **Full traceability chain**: `build/` file → module → `.aidc` → original `.aid` files
+   - Each generated file gets a comment header with the generating module path
+   - `.aidc` tracks which original `.aid` files contributed each rule
 
-6. **Full traceability chain**: `build/` file → module → `.aidc` → original `.aid` files
-   - Each generated file in `build/` gets a comment header with the generating module path
-   - The module's `.aidc` file tracks which original `.aid` files (and line ranges) contributed each rule
-   - This enables:
-     - "Where did this code come from?" → trace back to original spec
-     - "What code does this spec affect?" → trace forward to generated files
-     - Better debugging when generated code is wrong
-     - `--analyze` can correlate AI iterations with specific source lines
+---
+
+## File Structure
+
+```
+aidef/
+├── src/
+│   ├── types/index.ts      # All type definitions
+│   ├── parser/
+│   │   ├── lexer.ts        # Tokenizer
+│   │   ├── ast.ts          # AST parser
+│   │   ├── resolver.ts     # Import resolution
+│   │   └── index.ts        # Exports
+│   ├── compiler/
+│   │   ├── compile-node.ts # Node compilation
+│   │   ├── context-builder.ts
+│   │   ├── writer.ts       # File output
+│   │   └── index.ts
+│   ├── providers/
+│   │   ├── anthropic.ts
+│   │   ├── openai.ts
+│   │   ├── provider.ts     # Base interface
+│   │   ├── call-logger.ts
+│   │   └── index.ts
+│   └── cli/
+│       ├── index.ts        # Entry point
+│       └── commands/*.ts
+├── tests/
+│   ├── unit/               # Lexer, AST, resolver tests
+│   └── integration/        # Compiler tests with mocks
+├── docs/                   # Documentation
+├── examples/root.aid       # Example spec
+├── root.aid                # AIDef's own spec (meta)
+├── .aid-gen/               # Generated compilation output (gitignored)
+└── build/                  # Generated code (gitignored)
+```

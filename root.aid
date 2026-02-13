@@ -8,91 +8,99 @@
   files are the source of truth.
 */
 
-A CLI tool that compiles .aid files into code.
+A CLI tool that compiles .aid files into code;
 
 // === Hard requirements ===
-TypeScript strict mode !important
-Bun runtime, not Node !important
-No database - files are the source of truth !important
-Each submodule must be independently runnable !important
+TypeScript strict mode;
+Bun runtime, not Node;
+No database - files are the source of truth;
+Each submodule must be independently runnable;
 
 // === File types ===
-.aid-files {
-  // User source files, CSS-like natural language
-  parse with selector rules: name {}, .tag {}, etc
-  resolve @imports recursively
-  preserve ``` code blocks as literal prose
-  strip // and /* */ comments before AI sees content
+aid-files {
+  // User source files, nginx-like natural language
+  parse with module blocks: name { };
+  parse query filters: "question?" { };
+  resolve imports recursively;
+  preserve code blocks as literal prose;
+  strip comments before AI sees content;
 }
 
-.aidg-files {
-  // Generated nodes, same CSS-like format
-  fully resolved (no imports)
-  users can inspect and copy snippets back
+aidg-files {
+  // Generated nodes, same nginx-like format
+  fully resolved (no imports);
+  users can inspect and copy snippets back;
 }
 
-.aidc-files {
+aidc-files {
   // Context for nodes, YAML format
-  contains all potentially relevant info from ancestors
-  context filter agent selects relevant subset
+  contains all potentially relevant info from ancestors;
+  context filter agent selects relevant subset;
 }
 
-.aidq-files {
+aidq-files {
   // Questions/uncertainties, YAML format
-  users answer via --browse or direct edit
+  users answer via --browse or direct edit;
 }
 
 // === Core architecture ===
 
 parser {
-  parse .aid file syntax
+  parse .aid file syntax;
   
   lexer {
-    tokenize: selectors, braces, comments, code blocks, prose
-    handle nested structures
+    leaf=true;
+    tokenize: identifiers, braces, strings, numbers, semicolons;
+    handle comments and code blocks;
+    track line/column for error messages;
   }
   
   ast {
-    build tree from tokens
-    represent: modules, tags, selectors, rules, prose blocks
+    leaf=true;
+    build tree from tokens;
+    represent: modules, query filters, parameters, prose;
   }
   
   resolver {
-    apply CSS specificity rules
-    merge inherited context
-    resolve :or(), :not(), :has() selectors
-  }
-  
-  importer {
-    resolve @path imports
-    .aid files parsed with selectors
-    other files (.md, .txt) inlined as plain text
+    leaf=true;
+    resolve import statements;
+    detect circular imports;
+    inline non-.aid files as prose;
   }
 }
 
 compiler {
   // Phase 1: generate .aidg tree from root.aid
   
-  reads .aid files, outputs .aid-gen/ folder
-  each node produces node.aidc with full context
+  reads .aid files, outputs .aid-gen/ folder;
+  each node produces node.aidc with full context;
   
-  planner {
-    determine which submodules to create
-    identify leaf vs non-leaf nodes
-    all siblings run in parallel
+  compile-node {
+    leaf=true;
+    serialize AST to spec string;
+    call provider to compile;
+    write .aidg, .aidc, .aidq files;
   }
   
   context-builder {
-    gather all potentially relevant context
-    output as node.aidc (YAML)
-    include: interfaces, constraints, conventions, utilities
-    annotate where each directive originated
+    leaf=true;
+    gather all potentially relevant context;
+    output as node.aidc (YAML);
+    contains: interfaces, constraints, suggestions, utilities;
+    annotate where each directive originated;
   }
   
   differ {
-    compare new vs existing .aidg outputs
-    skip subtrees with identical interfaces
-    use interface hashes for fast comparison
+    leaf=true;
+    compare new vs existing .aidg outputs;
+    skip subtrees with identical interfaces;
+    use interface hashes for fast comparison;
+  }
+  
+  writer {
+    leaf=true;
+    write .aidg, .aidc, .aidq files;
+    create directory structure in .aid-gen/;
   }
 }
 
@@ -100,17 +108,21 @@ generator {
   // Phase 2: execute leaf nodes to produce code
   
   context-filter {
-    read node.aidc
-    determine relevant subset for this generation
-    // future: "skills" system triggers rules based on keywords
+    leaf=true;
+    read node.aidc;
+    determine relevant subset for this generation;
+    apply token budget limits;
   }
   
   executor {
-    invoke AI with filtered context + node.aidg
-    output code to build/ folder
+    leaf=true;
+    invoke AI with filtered context + node.aidg;
+    output code to build/ folder;
+    add source comment headers;
   }
   
   checks {
+    leaf=true;
     // TODO: post-generation enforcement
     // verify outputs match declared interfaces
     // flag deviations for review
@@ -118,83 +130,98 @@ generator {
 }
 
 cli {
-  use Bun.argv for argument parsing
+  use Bun.argv for argument parsing;
   
   run {
-    default mode: compile .aid tree
-    stream .aidq items as they appear
+    leaf=true;
+    default mode: compile .aid tree;
+    stream .aidq items as they appear;
+    parallel compilation of siblings;
   }
   
   browse {
-    TUI mode with --browse flag
-    watch compilation progress
-    browse .aidg tree structure  
-    view and answer .aidq questions inline
-    abort early if needed
+    leaf=true;
+    TUI mode with --browse flag;
+    watch compilation progress;
+    browse .aidg tree structure;
+    view and answer .aidq questions inline;
+    abort early if needed;
   }
   
   build {
-    --build flag: execute leaf nodes
-    generate code to ./build/
-    only after user approval
+    leaf=true;
+    --build flag: execute leaf nodes;
+    generate code to ./build/;
+    only after user approval;
   }
   
   estimate {
-    --estimate flag: show cost estimate
-    count nodes, estimate tokens
-    abort if exceeds --max-cost threshold
+    leaf=true;
+    --estimate flag: show cost estimate;
+    count nodes, estimate tokens;
+    abort if exceeds --max-cost threshold;
   }
   
   auth {
-    --auth flag: TUI for LLM provider configuration
-    support multiple providers: OpenAI, Anthropic, Google, local models, etc
-    store credentials securely (system keychain or encrypted config)
-    allow per-project overrides via .aidrc or environment
-    test connection before saving
+    leaf=true;
+    --auth flag: TUI for LLM provider configuration;
+    support multiple providers: OpenAI, Anthropic, etc;
+    store credentials via environment variables;
+    test connection before saving;
   }
 }
 
 providers {
-  // LLM provider abstraction
+  // LLM provider abstraction via Vercel AI SDK
   
-  common interface for all providers
-  support: OpenAI, Anthropic, Google, Ollama, OpenRouter, etc
+  common interface for all providers;
   
-  config {
-    global config in ~/.config/aid/
-    project config in .aidrc (gitignored)
-    environment variables as fallback
-    provider selection per task type (compile vs generate)
+  anthropic {
+    leaf=true;
+    @ai-sdk/anthropic adapter;
+    Claude models;
   }
   
-  adapter {
-    normalize request/response formats
-    handle rate limiting and retries
-    stream responses where supported
+  openai {
+    leaf=true;
+    @ai-sdk/openai adapter;
+    GPT models;
+  }
+  
+  call-logger {
+    leaf=true;
+    log all AI calls to calls.jsonl;
+    track tokens, duration, success/failure;
   }
 }
 
 questions {
-  generate .aidq files (YAML) for uncertainties
-  parse answered questions
-  inject answers into next compilation run
+  leaf=true;
+  generate .aidq files (YAML) for uncertainties;
+  parse answered questions;
+  inject answers into next compilation run;
 }
 
-// === Global conventions ===
+// === Query filters (apply to matching modules) ===
 
-:leaf {
-  include unit tests
-  use bun test
+"is this a leaf module?" {
+  add unit tests;
+  use bun test;
 }
 
-* {
-  prefer Bun APIs over Node equivalents
-  Bun.file over fs
-  Bun.serve if HTTP needed
-  Bun.$ for shell commands
+"needs file I/O?" {
+  prefer Bun.file over fs;
 }
 
-.tui {
-  consider ink or blessed
-  keep it simple - progress and tree view
+"needs HTTP?" {
+  use Bun.serve;
+}
+
+"needs shell commands?" {
+  use Bun.$;
+}
+
+"is this a TUI component?" {
+  consider ink or blessed;
+  keep it simple - progress and tree view;
 }
