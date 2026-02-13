@@ -403,11 +403,15 @@ client { }
       // Should still try to parse client
     });
 
-    test("reports missing path after include", () => {
+    test("treats bare include as prose when no valid path follows", () => {
+      // "include ;" doesn't look like a valid include statement (no path)
+      // so it's parsed as prose instead of an error
       const { ast, errors } = parseSource("include ;");
       
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0].message).toContain("path");
+      expect(errors).toHaveLength(0);
+      expect(ast.children).toHaveLength(1);
+      expect(ast.children[0].type).toBe("prose");
+      expect((ast.children[0] as any).content).toBe("include");
     });
   });
 

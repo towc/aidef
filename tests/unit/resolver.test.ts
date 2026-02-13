@@ -257,13 +257,20 @@ include ./diamond-right;
       expect(result.errors[0].message).toContain("Failed to read");
     });
 
-    test("reports URL imports as unsupported", async () => {
+    test("treats URL-like includes as prose (not valid include syntax)", async () => {
+      // URL includes like "include https://..." are not valid because:
+      // 1. "https" is an identifier (single token), OR
+      // 2. The ":" after makes it not look like a path
+      // So they get parsed as prose instead of include statements
       await writeTestFile("url-import.aid", 'include https://example.com/file.aid;');
       
       const result = await parseAndResolve(join(TEST_DIR, "url-import.aid"));
       
-      expect(result.errors.length).toBeGreaterThan(0);
-      expect(result.errors[0].message).toContain("URL imports not yet supported");
+      // No errors - it's just prose
+      expect(result.errors).toHaveLength(0);
+      // Content is parsed as prose
+      expect(result.ast.children).toHaveLength(1);
+      expect(result.ast.children[0].type).toBe("prose");
     });
 
     test("continues after error", async () => {

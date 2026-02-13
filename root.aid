@@ -21,7 +21,7 @@ aid-files {
   // User source files, nginx-like natural language
   parse with module blocks: name { };
   parse query filters: "question?" { };
-  resolve imports recursively;
+  resolve include statements recursively;
   preserve code blocks as literal prose;
   strip comments before AI sees content;
 }
@@ -63,7 +63,7 @@ parser {
   
   resolver {
     leaf=true;
-    resolve import statements;
+    resolve include statements;
     detect circular imports;
     inline non-.aid files as prose;
   }
@@ -86,7 +86,7 @@ compiler {
     leaf=true;
     gather all potentially relevant context;
     output as node.aidc (YAML);
-    contains: interfaces, constraints, suggestions, utilities;
+    include: interfaces, constraints, suggestions, utilities;
     annotate where each directive originated;
   }
   
@@ -205,7 +205,7 @@ questions {
 // === Query filters (apply to matching modules) ===
 
 "is this a leaf module?" {
-  add unit tests;
+  include unit tests;
   use bun test;
 }
 

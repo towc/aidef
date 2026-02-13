@@ -103,7 +103,9 @@ class Parser {
     }
 
     // Check for include statement
-    if (this.check("include")) {
+    // Only treat as include if it looks like: include <path>;
+    // Not: "include unit tests" or "include: foo, bar"
+    if (this.check("include") && this.looksLikeIncludeStatement()) {
       return this.parseInclude();
     }
 
@@ -171,6 +173,86 @@ class Parser {
     this.pos = savedPos;
     
     return isParam;
+  }
+
+  /**
+   * Check if this looks like an actual include statement vs prose starting with "include".
+   * 
+   * Valid include: `include ./path;` or `include name;` or `include ../foo/bar;`
+   * Invalid (prose): `include unit tests;` (multiple words after)
+   *                  `include: foo, bar` (colon after)
+   *                  `include in the bundle` (not a path)
+   * 
+   * Rules:
+   * 1. After `include` + whitespace, should be a path-like token
+   * 2. Path must start with `.` or `..` OR be a single identifier with no spaces after
+   * 3. If it's an identifier, there should be NO more tokens after (just ; or newline)
+   */
+  private looksLikeIncludeStatement(): boolean {
+    const savedPos = this.pos;
+    
+    this.advance(); // skip 'include'
+    this.skipWhitespace();
+    
+    // Check what follows
+    const nextToken = this.peek();
+    
+    // If immediately followed by colon, it's prose like "include: foo"
+    if (nextToken.type === "text" && nextToken.value.startsWith(":")) {
+      this.pos = savedPos;
+      return false;
+    }
+    
+    // If next token is not identifier or text starting with '.', it's not an include
+    if (nextToken.type !== "identifier" && nextToken.type !== "text") {
+      this.pos = savedPos;
+      return false;
+    }
+    
+    const firstValue = nextToken.value;
+    const startsWithDot = firstValue.startsWith(".");
+    
+    // Collect all non-whitespace tokens until terminator
+    let tokenCount = 0;
+    
+    while (!this.isAtEnd() && !this.check("semicolon") && !this.check("newline") && !this.check("brace_open") && !this.check("brace_close")) {
+      const token = this.peek();
+      
+      // Skip comments
+      if (token.type === "comment") {
+        this.advance();
+        continue;
+      }
+      
+      // At whitespace, check what follows
+      if (token.type === "whitespace") {
+        this.advance();
+        this.skipWhitespace();
+        
+        // If there's more content after whitespace, it's not an include
+        // (paths don't have spaces)
+        if (!this.isAtEnd() && !this.check("semicolon") && !this.check("newline") && !this.check("brace_open") && !this.check("brace_close") && !this.check("comment")) {
+          this.pos = savedPos;
+          return false;
+        }
+        break;
+      }
+      
+      tokenCount++;
+      this.advance();
+    }
+    
+    this.pos = savedPos;
+    
+    // Valid include patterns:
+    // 1. Starts with . or .. (relative path) - can have multiple tokens like ./foo/bar
+    // 2. Single identifier (bare name import) - exactly 1 token
+    if (startsWithDot) {
+      return tokenCount >= 1;
+    } else {
+      // Bare name: must be exactly 1 token (e.g., "include utils" not "include unit tests")
+      return tokenCount === 1;
+    }
   }
 
   /**
@@ -390,7 +472,7 @@ class Parser {
     }
 
     // Include statement
-    if (this.check("include")) {
+    if (this.check("include") && this.looksLikeIncludeStatement()) {
       return this.parseInclude();
     }
 
@@ -503,8 +585,9 @@ class Parser {
         continue;
       }
 
-      // Stop at include keyword (it's a statement)
-      if (token.type === "include") {
+      // Stop at include keyword only if it's at the start of a new statement
+      // (i.e., we haven't collected any content yet) AND it looks like an include
+      if (token.type === "include" && parts.length === 0 && this.looksLikeIncludeStatement()) {
         break;
       }
 
@@ -539,7 +622,8 @@ class Parser {
         token.type === "newline" ||
         token.type === "code_block" ||
         token.type === "inline_code" ||
-        token.type === "equals"  // standalone = becomes prose
+        token.type === "equals" ||  // standalone = becomes prose
+        token.type === "include"    // include not followed by path becomes prose
       ) {
         parts.push(token.value);
       }
