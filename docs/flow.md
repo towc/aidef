@@ -1,3 +1,5 @@
+> **OUTDATED**: This document may not reflect current design. Ask the user before assuming anything here is true.
+
 # AIDef Execution Flow
 
 ## Overview

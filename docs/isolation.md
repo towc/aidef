@@ -1,3 +1,5 @@
+> **OUTDATED**: This document may not reflect current design. Ask the user before assuming anything here is true.
+
 # Agent Isolation and Context Passing
 
 ## The Isolation Principle

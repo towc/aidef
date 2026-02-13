@@ -1,3 +1,5 @@
+> **OUTDATED**: This document may not reflect current design. Ask the user before assuming anything here is true.
+
 # Parallel Work Prompts
 
 These prompts can be given to separate Claude instances to work on different parts of AIDef in parallel. Each instance should be given the relevant AGENTS.md context and pointed to `src/types/index.ts` for interface definitions.
