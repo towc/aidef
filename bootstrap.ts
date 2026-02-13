@@ -103,49 +103,53 @@ const SYSTEM_PROMPT = `You are an AI code generator for the AIDef system.
 
 ## Your Task
 
-You will receive a .aid file which is a specification for software. Your job is to:
-1. Read and understand the specification
-2. Read any included files using the read_file tool
-3. Generate complete, working code
-4. Write the code to src/ using the write_file tool
+You will receive a .aid file which is a specification for a BUILD TOOL. Your job is to:
+1. Read and understand the FULL specification (read ALL included files)
+2. Generate a COMPLETE, FULLY WORKING implementation
+3. Write the code to src/ using the write_file tool
+
+## CRITICAL: This is a self-hosting compiler
+
+The specification describes AIDef - a tool that compiles .aid files into code using AI.
+You must implement ALL features described, including:
+
+1. **Parser**: Parse .aid syntax (modules, includes, params, comments)
+2. **Human mode compiler**: Resolve includes, generate node.gen.aid entry point  
+3. **Gen mode compiler**: Use LLM (Google Gemini) to process .gen.aid files, spawn children via gen_node/gen_leaf tools
+4. **Tree diffing**: Compare new vs old .gen.aid to skip unchanged branches
+5. **Runtime**: Collect leaf nodes, execute them in parallel, run whitelisted commands
+6. **CLI**: compile, run, analyse, browse commands
+
+You MUST use @google/genai for LLM calls (already installed).
+You MUST implement the gen_node and gen_leaf tools that nodes use to spawn children.
+You MUST implement tree diffing to avoid regenerating unchanged nodes.
 
 ## .aid File Format
 
-.aid files use a simple nginx-like syntax:
 - \`name { }\` defines a module block
-- \`include ./path;\` imports another file
-- \`#\` starts a comment (everything after # on a line is ignored)
-- Everything else is prose (natural language specification)
-
-Example:
-\`\`\`
-# A simple API
-server {
-  HTTP server using Bun.serve;
-  Port 3000;
-  
-  routes {
-    GET /health returns { ok: true };
-  }
-}
-\`\`\`
+- \`include ./path;\` imports another file  
+- \`#\` starts a comment
+- \`param=value;\` defines parameters
+- Everything else is prose
 
 ## Rules
 
-1. Read the root .aid file first to understand the full specification
-2. Use read_file to load any included files
-3. Generate TypeScript code unless otherwise specified
-4. Write ALL generated files to src/ using write_file
-5. Create a complete, working implementation
-6. Follow any constraints or requirements in the specification
+1. Read ALL .aid files via read_file before generating code
+2. Generate TypeScript for Bun runtime
+3. Implement EVERY feature in the specification - no stubs or TODOs
+4. The tool must be able to compile itself when run on its own root.aid
 
-## Output
+## Output Structure
 
-Use the write_file tool to create each source file. Common structure:
-- src/index.ts - entry point
-- src/[module]/... - module implementations
+- src/index.ts - CLI entry point
+- src/compiler/parser.ts - .aid parser
+- src/compiler/human.ts - human mode (resolve includes)
+- src/compiler/gen.ts - gen mode (LLM processing with gen_node/gen_leaf)
+- src/compiler/diff.ts - tree diffing logic
+- src/runtime/index.ts - runtime execution
+- src/utils/ - shared utilities
 
-Start by reading and understanding the specification, then generate the code.`;
+Generate ALL files needed for a complete, working implementation.`;
 
 // =============================================================================
 // Main
@@ -193,7 +197,16 @@ async function main() {
     });
     
     let stepCount = 0;
-    const maxSteps = 50;
+    const maxSteps = 100;
+    const requiredFiles = [
+      'src/index.ts',
+      'src/compiler/parser.ts', 
+      'src/compiler/human.ts',
+      'src/compiler/gen.ts',
+      'src/compiler/diff.ts',
+      'src/runtime/index.ts',
+    ];
+    const writtenFiles = new Set<string>();
     
     while (stepCount < maxSteps) {
       stepCount++;
@@ -201,7 +214,15 @@ async function main() {
       // Check for function calls
       const functionCalls = response.functionCalls;
       if (!functionCalls || functionCalls.length === 0) {
-        // No more function calls, we're done
+        // Check if we have all required files
+        const missingFiles = requiredFiles.filter(f => !writtenFiles.has(f));
+        if (missingFiles.length > 0) {
+          console.log(`\n  [continuing] Missing files: ${missingFiles.join(', ')}`);
+          response = await chat.sendMessage({
+            message: `You stopped before completing the implementation. You still need to generate these files: ${missingFiles.join(', ')}. Continue generating the remaining files.`
+          });
+          continue;
+        }
         break;
       }
       
@@ -214,7 +235,9 @@ async function main() {
         if (call.name === "read_file") {
           result = await readFile(call.args.path as string);
         } else if (call.name === "write_file") {
-          result = await writeFile(call.args.path as string, call.args.content as string);
+          const path = call.args.path as string;
+          writtenFiles.add(path);
+          result = await writeFile(path, call.args.content as string);
         } else {
           result = { error: `Unknown function: ${call.name}` };
         }
@@ -239,6 +262,7 @@ async function main() {
     console.log("\n==================");
     console.log("Generation complete!");
     console.log(`Steps taken: ${stepCount}`);
+    console.log(`Files written: ${Array.from(writtenFiles).join(', ')}`);
     
     if (response.text) {
       console.log("\nFinal response from generator:");
