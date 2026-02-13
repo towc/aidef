@@ -18,8 +18,10 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.43",
     "@ai-sdk/google": "^3.0.29",
-    "@ai-sdk/openai": "^3.0.28",
-    "ai": "^6.0.85",
+    "@ai-sdk/openai": "^3.0.29",
+    "@google/genai": "^1.41.0",
+    "ai": "^6.0.86",
+    "commander": "^14.0.3",
     "zod": "^3.24.0"
   }
 }

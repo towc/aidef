@@ -1,0 +1,118 @@
+aidef is a new high-level programming language that allows developers to write the source code (.aid files) of a project for an AI to build;
+
+The point of a programming language is to translate human thoughts into unambiguous instructions.
+  The more high-level a language is, the easier it is for the user, typically, but not if it's at the cost of not being able to specify details, think about how e.g. javascript still has bitwise operators and some low-level tooling, despite being a high-level language, and that's one of the reasons it's so popular.
+  Aidef is no different. It's the next step above transpilation: transistors <- cpu instructions <- machine code <- assembly <- low-level language <- interpreters <- high-level language <- transpilers.
+  The aidef build tool is a transpiler from .aid files into other high- or low- level languages that have deterministic runners (e.g. typescript or python or rust or c or any combination of commonly used languages), but we do this carefully and cleverly to minimize AI inference costs and build times;
+
+.aid files have a parseable syntax resembling nginx configuration, except it allows for prose;
+This is the root.aid file for the aidef project, it is a good example of how .aid files look like;
+
+typescript/bun;
+
+The core of the aidef is to have a pipeline to take these .aid files into an actionable highly parallelizable plan. We call this plan generation "compilation";
+
+compiler {
+  processes .aid files into the project directory structure;
+
+  The compiled tree consists of .gen.aid nodes and .gen.aid.leaf.json leaves;
+  The folder structure mirrors the module structure directly in the project root, e.g. ./server/api/node.gen.aid;
+
+  Nodes are responsible for generating interfaces, and planning work to be done in parallel by children it spawns.
+    We generate interfaces first so that the work can be in parallel, that's the core of the tool.
+    Nodes can spawn other nodes with the `gen_node` tool, with this heavily encapsulated and parallelizable context thanks to the interfaces, until eventually they use the `gen_leaf` tool when the task is small enough that we're confident it can be zero-shot by an AI (but we do allow multi-shot and continues retries up until `max_retries` is reached, which can also be set by the parent, but can't be above what the user config has, nor above what the parent's `max_retries` is).
+
+  Nodes are akin to typical packages/modules/functions, and leaves are closer to primitive operations, like "implement an in-memory cache layer with these signatures and these behaviours", instructions you would be able to give to a junior developer with the confidence that the task is well-defined enough they won't mess it up, but without having to be so specific that you're writing the code yourself;
+
+  The leaf nodes are .gen.aid.leaf.json files that can be collected by the runtime, and each one contains a specific format: prompt: string, files: string[], commands: string[].
+    Prompt contains all the relevant instructions from the parent, mainly the relevant interfaces to adhere to (not stored elsewhere, completely encapsulated within the prompt) and what needs to be implemented where.
+    Nodes also have the prompt and files, except the nodes' prompt is itself .aid text, and we should inject a system prompt explaining how to parse it.
+    Files contains the list of files that this leaf can write to, and is provided by the parent.
+    Commands contains shell commands the leaf needs to run (e.g. `npm init`, `npm install`), which must be in the whitelist.
+    A lightweight process during compilation should check that no 2 leaves can write to the same file;
+
+  Each node and leaf has its own folder that is not shared by any other nodes/leaves.
+    This is possible because the parent needs to implement a clear interface for the children, and that parent can spawn a leaf to import from the other children, as decided by the interface (no runtime reading of other files).
+    It's important to do it this way to minimize drift from the original developer plans, ensure good parallelization, and the tree-diffing feature;
+
+  Tree diffing is to avoid unnecessary inferences during both compilation and runtime.
+    When compiling, if we have the previous compiled .gen.aid code, we can avoid going deeper into that branch by checking whether the new .gen.aid file that would be replacing that node is for all practical purposes equivalent, with no deviations. If it is the same, then we can keep it and all of its children, and don't need to recurse further as we'd expect the output to be the same.
+    If the tree diff shows there would be some change, we prune the whole affected branch.
+    When pruning, we only delete files that are listed in the leaf nodes' `files` arrays, preserving any user files like .env or local config;
+    It's partly because of this that we'd like generated nodes to be predictable, which is why AI calls should be made at a very low (or 0) temperature, and one of the reasons we want to encapsulate so heavily so that we don't have side effects to worry about.
+    We want to make the cycle of "user makes change to code -> user sees effect of change" to be as fast as possible. These fast iteration cycles are important to a great developer experience, therefore increasing the chances for the developer to build a great product.
+
+  parser {
+    a general .aid file involves a few syntactic features that have implications which we must enforce deterministically;
+
+    `include <path>;` statements, where the path can be a local .aid file, or an https:// link.
+      This essentially involves taking what's in that path, and replacing this line with the entirety of that file content.
+      For .aid files, process recursively.
+      For non-.aid files (like .md), escape any `#` characters that could be mistaken for comments (e.g. markdown headers), and encapsulate appropriately as prose.
+      include is for humans, if we see this in a .gen.aid file, we ignore it and mark as a compile-time warning.
+      The .gen.aid node agents shouldn't even be aware that this is .aid syntax, they don't have access to any files that have not already been included. They can still make web requests (the result of which should be cached with an option to reset the cache, in case they ask again in the future) via a tool we provide, in case they need extra documentation or information;
+
+    the `<module> { <instructions> }` blocks mean that there must be a node called `<module>` at some point in the subtree of the parent.
+      It doesn't need to be a direct child, the parent should however be aware that the module exists, and must keep it in its plans. This is another compile-time warning we can give if we don't detect it.
+      Instructions can be prose like most of the current file, for the AI to interpret, or more `include` statements, or other syntax in this parser module definition;
+
+    `<param>=<value>;` define special params to be given to a module, e.g. I can specify `type=leaf;` if I want to give the instruction that this node MUST be a leaf, and this can be enforced/monitored deterministically during compilation.
+      Other params include `path=some_path`, in case we don't want the output path to have the same name as the node, `files=file1,file2,file3;` for files that a node should create, which can be passed on to a leaf and enforced/monitored at runtime.
+      We always treat these specially if the exact syntax is detected, and we don't mark unknown properties as errors but as warnings, in case later we decide to add a plugin system which can leverage these properties;
+
+    `#` for comments, everything after `#` on a line is ignored (except within code blocks or when escaped);
+  }
+
+  human {
+    if no --path is passed, it starts with the root.aid of the project;
+    root.aid is written by humans and is the effective source code;
+    Our tool never modifies the human-written files, they are the source code;
+
+    In human mode, it processes root.aid (resolving all includes) and generates ./node.gen.aid as the entry point;
+    This is essentially a pre-compilation step that resolves all human includes into a single processed tree;
+  }
+
+  gen {
+    if the file being compiled is a .gen.aid file, we use this mode;
+
+    Compiling a .gen.aid file means parsing the file, processing it with an llm after injecting system prompts, and providing tools for creating children.
+      Node children should go to `./<node_name>/node.gen.aid`, leaves go to `./<leaf_name>/leaf.gen.aid.leaf.json` as previously described.
+      Leaf nodes are just json because they don't need to specify any children, and don't need other special syntax. Any special properties can be captured in the json directly, and the runtime can interface with that json without needing an aid parser;
+  }
+
+  command_whitelist {
+    Leaf nodes can request to run shell commands, but only if they're in the whitelist.
+    Default whitelist includes safe initialization commands: `npm init`, `npm install`, `bun install`, etc.
+    Users can configure additional allowed commands in their project config.
+    The --analyse mode can suggest new commands to whitelist based on what leaves are trying to run.
+    Commands are executed in the leaf's folder context.
+  }
+}
+
+
+Once everything is compiled, the developer has the option to inspect the plan and make adjustments to the human .aid files and re-compiling, before executing the plan with the runtime.
+
+runtime {
+  collects all the leaf nodes, and starts running them in parallel;
+  keeps the user updated as it progresses;
+  stores all ai calls made in ./runtime.log.jsonl;
+  
+  For each leaf, the runtime:
+    1. Reads the .gen.aid.leaf.json file
+    2. Runs any whitelisted commands in the leaf's `commands` array
+    3. Generates files listed in the leaf's `files` array using AI
+    4. All work happens within the leaf's folder context
+}
+
+
+cli {
+  --compile: runs the compiler to completion;
+  --run: executes the runtime;
+  --analyse {
+    looks at the compiled plan, the ai call logs from the compilation (and runtime if already executed), and analyses it to determine the flow of instructions via parseable .gen.aid.map files, similar to javascript source maps, indicating what line of code in the corresponding .aid file came from which line of code of which other file;
+    It also looks at whether there was some miscommunication between parent and child, or whether a node took a long time to reach an answer that could have been reached much more quickly with a small hint, then records it in a .gen.aid.info file (including any questions for the user), and provides suggestions (recursively based on the .aid.map files) on which original human .aid file should be ammended and how.
+  }
+  --browse {
+    a tui tool to inspect the plan files and analysis output, with options to automatically (or manually) implement them.
+  }
+}

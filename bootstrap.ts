@@ -6,33 +6,9 @@
  * referenced files and writing generated code to src/.
  */
 
-import { generateText, tool } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
-import { z } from "zod";
+import { GoogleGenAI, Type } from "@google/genai";
 import { resolve, dirname, join } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
-
-// =============================================================================
-// Provider Setup
-// =============================================================================
-
-function getModel() {
-  if (process.env.GEMINI_API_KEY) {
-    const google = createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY });
-    return google("gemini-2.5-pro-preview-06-05");
-  }
-  if (process.env.ANTHROPIC_API_KEY) {
-    const anthropic = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    return anthropic("claude-sonnet-4-20250514");
-  }
-  if (process.env.OPENAI_API_KEY) {
-    const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    return openai("gpt-4o");
-  }
-  throw new Error("No API key found. Set GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY");
-}
 
 // =============================================================================
 // Project Root
@@ -44,57 +20,80 @@ const projectRoot = dirname(resolve(process.argv[2] || "root.aid"));
 // Tools
 // =============================================================================
 
-const readFileTool = tool({
-  description: "Read a file from the project. Use this to read .aid files or any other referenced files.",
-  parameters: z.object({
-    path: z.string().describe("Relative path from project root"),
-  }),
-  execute: async ({ path }) => {
-    const fullPath = join(projectRoot, path);
-    console.log(`  [read] ${path}`);
-    
-    try {
-      const file = Bun.file(fullPath);
-      if (!await file.exists()) {
-        return { error: `File not found: ${path}` };
-      }
-      const content = await file.text();
-      return { content };
-    } catch (err) {
-      return { error: `Failed to read ${path}: ${err}` };
+async function readFile(path: string): Promise<{ content?: string; error?: string }> {
+  const fullPath = join(projectRoot, path);
+  console.log(`  [read] ${path}`);
+  
+  try {
+    const file = Bun.file(fullPath);
+    if (!await file.exists()) {
+      return { error: `File not found: ${path}` };
     }
-  },
-});
+    const content = await file.text();
+    return { content };
+  } catch (err) {
+    return { error: `Failed to read ${path}: ${err}` };
+  }
+}
 
-const writeFileTool = tool({
-  description: "Write a file to src/. Use this to output generated code. Path must start with src/.",
-  parameters: z.object({
-    path: z.string().describe("Path starting with src/, e.g. src/index.ts"),
-    content: z.string().describe("File content to write"),
-  }),
-  execute: async ({ path, content }) => {
-    // Security: only allow writing to src/
-    if (!path.startsWith("src/")) {
-      return { error: `Cannot write to ${path}: path must start with src/` };
+async function writeFile(path: string, content: string): Promise<{ success?: boolean; path?: string; error?: string }> {
+  // Security: only allow writing to src/
+  if (!path.startsWith("src/")) {
+    return { error: `Cannot write to ${path}: path must start with src/` };
+  }
+  
+  const fullPath = join(projectRoot, path);
+  console.log(`  [write] ${path}`);
+  
+  try {
+    // Ensure directory exists
+    const dir = dirname(fullPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
     }
     
-    const fullPath = join(projectRoot, path);
-    console.log(`  [write] ${path}`);
-    
-    try {
-      // Ensure directory exists
-      const dir = dirname(fullPath);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-      }
-      
-      await Bun.write(fullPath, content);
-      return { success: true, path };
-    } catch (err) {
-      return { error: `Failed to write ${path}: ${err}` };
+    await Bun.write(fullPath, content);
+    return { success: true, path };
+  } catch (err) {
+    return { error: `Failed to write ${path}: ${err}` };
+  }
+}
+
+// Tool declarations for Gemini
+const tools = [
+  {
+    name: "read_file",
+    description: "Read a file from the project. Use this to read .aid files or any other referenced files.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        path: {
+          type: Type.STRING,
+          description: "Relative path from project root"
+        }
+      },
+      required: ["path"]
     }
   },
-});
+  {
+    name: "write_file", 
+    description: "Write a file to src/. Use this to output generated code. Path must start with src/.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        path: {
+          type: Type.STRING,
+          description: "Path starting with src/, e.g. src/index.ts"
+        },
+        content: {
+          type: Type.STRING,
+          description: "File content to write"
+        }
+      },
+      required: ["path", "content"]
+    }
+  }
+];
 
 // =============================================================================
 // System Prompt
@@ -115,12 +114,12 @@ You will receive a .aid file which is a specification for software. Your job is 
 .aid files use a simple nginx-like syntax:
 - \`name { }\` defines a module block
 - \`include ./path;\` imports another file
-- \`/* */\` and \`//\` are comments
+- \`#\` starts a comment (everything after # on a line is ignored)
 - Everything else is prose (natural language specification)
 
 Example:
 \`\`\`
-// A simple API
+# A simple API
 server {
   HTTP server using Bun.serve;
   Port 3000;
@@ -170,26 +169,80 @@ async function main() {
   
   const content = await file.text();
   
+  if (!process.env.GEMINI_API_KEY) {
+    console.error("Error: GEMINI_API_KEY not set");
+    process.exit(1);
+  }
+  
+  console.log("Using Google Gemini");
   console.log("Generating code...\n");
   
   try {
-    const result = await generateText({
-      model: getModel(),
-      system: SYSTEM_PROMPT,
-      prompt: `Here is the root .aid specification:\n\n${content}\n\nRead any included files, then generate the complete implementation.`,
-      tools: {
-        read_file: readFileTool,
-        write_file: writeFileTool,
-      },
-      maxSteps: 50,
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    
+    const chat = ai.chats.create({
+      model: "gemini-2.5-flash",
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        tools: [{ functionDeclarations: tools }],
+      }
     });
+    
+    let response = await chat.sendMessage({
+      message: `Here is the root .aid specification:\n\n${content}\n\nRead any included files, then generate the complete implementation.`
+    });
+    
+    let stepCount = 0;
+    const maxSteps = 50;
+    
+    while (stepCount < maxSteps) {
+      stepCount++;
+      
+      // Check for function calls
+      const functionCalls = response.functionCalls;
+      if (!functionCalls || functionCalls.length === 0) {
+        // No more function calls, we're done
+        break;
+      }
+      
+      console.log(`  [step ${stepCount}] ${functionCalls.length} tool call(s)`);
+      
+      // Execute each function call
+      const functionResponses = [];
+      for (const call of functionCalls) {
+        let result;
+        if (call.name === "read_file") {
+          result = await readFile(call.args.path as string);
+        } else if (call.name === "write_file") {
+          result = await writeFile(call.args.path as string, call.args.content as string);
+        } else {
+          result = { error: `Unknown function: ${call.name}` };
+        }
+        
+        functionResponses.push({
+          name: call.name,
+          response: result
+        });
+      }
+      
+      // Send function responses back
+      response = await chat.sendMessage({
+        message: functionResponses.map(fr => ({
+          functionResponse: {
+            name: fr.name,
+            response: fr.response
+          }
+        }))
+      });
+    }
     
     console.log("\n==================");
     console.log("Generation complete!");
+    console.log(`Steps taken: ${stepCount}`);
     
-    if (result.text) {
-      console.log("\nNotes from generator:");
-      console.log(result.text);
+    if (response.text) {
+      console.log("\nFinal response from generator:");
+      console.log(response.text);
     }
     
   } catch (err) {
