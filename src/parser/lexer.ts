@@ -1,20 +1,35 @@
 /**
  * AIDef Lexer
  *
- * Tokenizes .aid files into a stream of tokens for the parser.
- * Supports CSS-like syntax with imports, code blocks, and prose content.
+ * Tokenizes .aid files with nginx-like syntax.
+ * 
+ * Token types:
+ * - identifier: module names, parameter names (no spaces)
+ * - string: "..." for query filters and parameter values
+ * - number: 123 for numeric parameter values
+ * - brace_open/close: { }
+ * - semicolon: ;
+ * - equals: =
+ * - include: the 'include' keyword
+ * - comment: /* * / and //
+ * - code_block: ```...```
+ * - inline_code: `...`
+ * - text: plain text (prose)
+ * - newline: \n
+ * - whitespace: spaces/tabs
+ * - eof: end of file
  */
 
 import type {
   Token,
   TokenType,
+  SourceLocation,
   LexerResult,
   LexerError,
-  SourceLocation,
 } from "../types/index.js";
 
 /**
- * Tokenize an AID source file into tokens.
+ * Tokenize an .aid file.
  *
  * @param source - The source code to tokenize
  * @param filename - The filename for error reporting
@@ -43,7 +58,7 @@ class Lexer {
   }
 
   /**
-   * Main tokenization loop.
+   * Main tokenize method.
    */
   tokenize(): LexerResult {
     while (!this.isAtEnd()) {
@@ -60,297 +75,327 @@ class Lexer {
   }
 
   /**
-   * Scan a single token from the current position.
+   * Scan a single token.
    */
   private scanToken(): void {
-    const c = this.peek();
+    const char = this.peek();
 
-    // Newline
-    if (c === "\n") {
-      this.addToken("newline", this.advance());
-      return;
-    }
-
-    // Whitespace (spaces, tabs, carriage returns)
-    if (c === " " || c === "\t" || c === "\r") {
+    // Whitespace (not newline)
+    if (char === " " || char === "\t" || char === "\r") {
       this.scanWhitespace();
       return;
     }
 
-    // Comments
-    if (c === "/") {
-      if (this.peekNext() === "/") {
-        this.scanLineComment();
-        return;
-      }
-      if (this.peekNext() === "*") {
-        this.scanBlockComment();
-        return;
-      }
+    // Newline
+    if (char === "\n") {
+      this.addToken("newline", "\n");
+      this.advance();
+      this.line++;
+      this.column = 1;
+      return;
     }
 
-    // Fenced code blocks (```)
-    if (c === "`" && this.peekNext() === "`" && this.peekAt(2) === "`") {
+    // Block comment: /* ... */
+    if (char === "/" && this.peekNext() === "*") {
+      this.scanBlockComment();
+      return;
+    }
+
+    // Line comment: // ...
+    if (char === "/" && this.peekNext() === "/") {
+      this.scanLineComment();
+      return;
+    }
+
+    // Fenced code block: ```...```
+    if (char === "`" && this.peekNext() === "`" && this.peek(2) === "`") {
       this.scanFencedCodeBlock();
       return;
     }
 
-    // Inline code blocks (`)
-    if (c === "`") {
+    // Inline code: `...`
+    if (char === "`") {
       this.scanInlineCode();
       return;
     }
 
-    // Import (@path)
-    if (c === "@") {
-      this.scanImport();
+    // String: "..."
+    if (char === '"') {
+      this.scanString();
       return;
     }
 
-    // Important (!important)
-    if (c === "!") {
-      if (this.matchAhead("!important")) {
-        this.scanImportant();
-        return;
-      }
-      // Unknown ! - treat as prose start
-      this.scanProse();
+    // Braces
+    if (char === "{") {
+      this.addToken("brace_open", "{");
+      this.advance();
       return;
     }
 
-    // Single-character tokens
-    if (c === "{") {
-      this.addToken("brace_open", this.advance());
-      return;
-    }
-    if (c === "}") {
-      this.addToken("brace_close", this.advance());
-      return;
-    }
-    if (c === "(") {
-      this.addToken("paren_open", this.advance());
-      return;
-    }
-    if (c === ")") {
-      this.addToken("paren_close", this.advance());
-      return;
-    }
-    if (c === ".") {
-      this.addToken("dot", this.advance());
-      return;
-    }
-    if (c === ":") {
-      this.addToken("colon", this.advance());
-      return;
-    }
-    if (c === "*") {
-      this.addToken("star", this.advance());
-      return;
-    }
-    if (c === "+") {
-      this.addToken("plus", this.advance());
-      return;
-    }
-    if (c === "~") {
-      this.addToken("tilde", this.advance());
-      return;
-    }
-    if (c === ">") {
-      this.addToken("gt", this.advance());
+    if (char === "}") {
+      this.addToken("brace_close", "}");
+      this.advance();
       return;
     }
 
-    // Identifiers
-    if (this.isIdentifierStart(c)) {
+    // Semicolon
+    if (char === ";") {
+      this.addToken("semicolon", ";");
+      this.advance();
+      return;
+    }
+
+    // Equals
+    if (char === "=") {
+      this.addToken("equals", "=");
+      this.advance();
+      return;
+    }
+
+    // Number (for parameters like priority=1)
+    if (this.isDigit(char)) {
+      this.scanNumber();
+      return;
+    }
+
+    // Identifier or keyword
+    if (this.isIdentifierStart(char)) {
       this.scanIdentifier();
       return;
     }
 
-    // Everything else is prose
-    this.scanProse();
+    // Everything else is text (prose)
+    this.scanText();
   }
 
   /**
-   * Scan whitespace (spaces and tabs only, not newlines).
+   * Scan whitespace (spaces and tabs, not newlines).
    */
   private scanWhitespace(): void {
     const start = this.pos;
     while (!this.isAtEnd()) {
-      const c = this.peek();
-      if (c === " " || c === "\t" || c === "\r") {
+      const char = this.peek();
+      if (char === " " || char === "\t" || char === "\r") {
         this.advance();
       } else {
         break;
       }
     }
-    this.addTokenAt("whitespace", this.source.slice(start, this.pos), start);
+    const value = this.source.slice(start, this.pos);
+    this.addToken("whitespace", value);
   }
 
   /**
-   * Scan a line comment (// ...).
+   * Scan a block comment: /* ... * /
+   */
+  private scanBlockComment(): void {
+    const startLine = this.line;
+    const startColumn = this.column;
+    const start = this.pos;
+
+    // Consume /*
+    this.advance(); // /
+    this.advance(); // *
+
+    while (!this.isAtEnd()) {
+      if (this.peek() === "*" && this.peekNext() === "/") {
+        this.advance(); // *
+        this.advance(); // /
+        break;
+      }
+      if (this.peek() === "\n") {
+        this.line++;
+        this.column = 0; // Will be incremented by advance()
+      }
+      this.advance();
+    }
+
+    const value = this.source.slice(start, this.pos);
+    this.tokens.push({
+      type: "comment",
+      value,
+      location: {
+        file: this.filename,
+        line: startLine,
+        column: startColumn,
+        offset: start,
+      },
+    });
+
+    // Check if comment was closed
+    if (!value.endsWith("*/")) {
+      this.addError("Unclosed block comment", start);
+    }
+  }
+
+  /**
+   * Scan a line comment: // ...
    */
   private scanLineComment(): void {
     const start = this.pos;
-    // Consume //
-    this.advance();
-    this.advance();
 
-    // Consume until newline or end
+    // Consume until end of line
     while (!this.isAtEnd() && this.peek() !== "\n") {
       this.advance();
     }
 
-    this.addTokenAt("comment", this.source.slice(start, this.pos), start);
+    const value = this.source.slice(start, this.pos);
+    this.addToken("comment", value);
   }
 
   /**
-   * Scan a block comment (/* ... *\/).
+   * Scan a fenced code block: ```...```
    */
-  private scanBlockComment(): void {
-    const start = this.pos;
+  private scanFencedCodeBlock(): void {
     const startLine = this.line;
     const startColumn = this.column;
+    const start = this.pos;
 
-    // Consume /*
-    this.advance();
-    this.advance();
+    // Consume opening ```
+    this.advance(); // `
+    this.advance(); // `
+    this.advance(); // `
 
-    // Consume until */ or end
-    while (!this.isAtEnd()) {
-      if (this.peek() === "*" && this.peekNext() === "/") {
-        this.advance();
-        this.advance();
-        this.addTokenAt("comment", this.source.slice(start, this.pos), start);
-        return;
-      }
+    // Consume optional language identifier on same line
+    while (!this.isAtEnd() && this.peek() !== "\n") {
       this.advance();
     }
 
-    // Unclosed comment - add error but still create token
-    this.addError("Unclosed block comment", {
-      file: this.filename,
-      line: startLine,
-      column: startColumn,
-      offset: start,
-    });
-    this.addTokenAt("comment", this.source.slice(start, this.pos), start);
-  }
-
-  /**
-   * Scan a fenced code block (```...```).
-   */
-  private scanFencedCodeBlock(): void {
-    const start = this.pos;
-    const startLine = this.line;
-    const startColumn = this.column;
-
-    // Consume opening ```
-    this.advance();
-    this.advance();
-    this.advance();
-
-    // Consume until closing ``` or end
+    // Consume content until closing ```
     while (!this.isAtEnd()) {
+      if (this.peek() === "\n") {
+        this.line++;
+        this.column = 0;
+      }
+
+      // Check for closing ``` at start of line
       if (
         this.peek() === "`" &&
         this.peekNext() === "`" &&
-        this.peekAt(2) === "`"
+        this.peek(2) === "`"
       ) {
-        this.advance();
-        this.advance();
-        this.advance();
-        this.addTokenAt("code_block", this.source.slice(start, this.pos), start);
-        return;
+        this.advance(); // `
+        this.advance(); // `
+        this.advance(); // `
+        break;
       }
+
       this.advance();
     }
 
-    // Unclosed code block - add error but still create token
-    this.addError("Unclosed fenced code block", {
-      file: this.filename,
-      line: startLine,
-      column: startColumn,
-      offset: start,
+    const value = this.source.slice(start, this.pos);
+    this.tokens.push({
+      type: "code_block",
+      value,
+      location: {
+        file: this.filename,
+        line: startLine,
+        column: startColumn,
+        offset: start,
+      },
     });
-    this.addTokenAt("code_block", this.source.slice(start, this.pos), start);
+
+    // Check if code block was closed
+    if (!value.endsWith("```")) {
+      this.addError("Unclosed fenced code block", start);
+    }
   }
 
   /**
-   * Scan an inline code block (`...`).
+   * Scan inline code: `...`
    */
   private scanInlineCode(): void {
     const start = this.pos;
-    const startLine = this.line;
-    const startColumn = this.column;
 
     // Consume opening `
     this.advance();
 
-    // Consume until closing ` or newline or end
+    // Consume until closing ` or newline
     while (!this.isAtEnd() && this.peek() !== "`" && this.peek() !== "\n") {
       this.advance();
     }
 
     if (this.peek() === "`") {
-      this.advance();
-      this.addTokenAt("inline_code", this.source.slice(start, this.pos), start);
+      this.advance(); // closing `
     } else {
-      // Unclosed inline code - add error but still create token
-      this.addError("Unclosed inline code", {
+      this.addError("Unclosed inline code", start);
+    }
+
+    const value = this.source.slice(start, this.pos);
+    this.addToken("inline_code", value);
+  }
+
+  /**
+   * Scan a string: "..."
+   */
+  private scanString(): void {
+    const startLine = this.line;
+    const startColumn = this.column;
+    const start = this.pos;
+
+    // Consume opening "
+    this.advance();
+
+    // Consume until closing " (handle escapes)
+    while (!this.isAtEnd() && this.peek() !== '"') {
+      if (this.peek() === "\\") {
+        this.advance(); // backslash
+        if (!this.isAtEnd()) {
+          this.advance(); // escaped char
+        }
+      } else if (this.peek() === "\n") {
+        // Strings can span lines in our syntax
+        this.line++;
+        this.column = 0;
+        this.advance();
+      } else {
+        this.advance();
+      }
+    }
+
+    if (this.peek() === '"') {
+      this.advance(); // closing "
+    } else {
+      this.addError("Unclosed string", start);
+    }
+
+    const value = this.source.slice(start, this.pos);
+    this.tokens.push({
+      type: "string",
+      value,
+      location: {
         file: this.filename,
         line: startLine,
         column: startColumn,
         offset: start,
-      });
-      this.addTokenAt("inline_code", this.source.slice(start, this.pos), start);
-    }
+      },
+    });
   }
 
   /**
-   * Scan an import token (@path).
+   * Scan a number.
    */
-  private scanImport(): void {
+  private scanNumber(): void {
     const start = this.pos;
 
-    // Consume @
-    this.advance();
+    while (!this.isAtEnd() && this.isDigit(this.peek())) {
+      this.advance();
+    }
 
-    // Consume the path (until whitespace or structural character)
-    while (!this.isAtEnd()) {
-      const c = this.peek();
-      // Stop at whitespace, newlines, braces, parens, or other structural chars
-      if (
-        c === " " ||
-        c === "\t" ||
-        c === "\r" ||
-        c === "\n" ||
-        c === "{" ||
-        c === "}" ||
-        c === "(" ||
-        c === ")"
-      ) {
-        break;
+    // Handle decimal
+    if (this.peek() === "." && this.isDigit(this.peekNext())) {
+      this.advance(); // .
+      while (!this.isAtEnd() && this.isDigit(this.peek())) {
+        this.advance();
       }
-      this.advance();
     }
 
-    this.addTokenAt("import", this.source.slice(start, this.pos), start);
+    const value = this.source.slice(start, this.pos);
+    this.addToken("number", value);
   }
 
   /**
-   * Scan !important token.
-   */
-  private scanImportant(): void {
-    const start = this.pos;
-    // Consume "!important" (10 characters)
-    for (let i = 0; i < 10; i++) {
-      this.advance();
-    }
-    this.addTokenAt("important", "!important", start);
-  }
-
-  /**
-   * Scan an identifier.
+   * Scan an identifier or keyword.
    */
   private scanIdentifier(): void {
     const start = this.pos;
@@ -359,55 +404,47 @@ class Lexer {
       this.advance();
     }
 
-    this.addTokenAt("identifier", this.source.slice(start, this.pos), start);
+    const value = this.source.slice(start, this.pos);
+
+    // Check for keywords
+    if (value === "include") {
+      this.addToken("include", value);
+    } else {
+      this.addToken("identifier", value);
+    }
   }
 
   /**
-   * Scan prose content (plain text between structural elements).
-   * Prose is text that cannot be parsed as other token types.
+   * Scan text (prose) - anything that's not a structural token.
+   * Stops at: { } ; = " ` newline, or identifier/keyword boundary
    */
-  private scanProse(): void {
+  private scanText(): void {
     const start = this.pos;
 
     while (!this.isAtEnd()) {
-      const c = this.peek();
+      const char = this.peek();
 
-      // Stop at whitespace (handled by main scanner)
-      if (c === " " || c === "\t" || c === "\r") {
-        break;
-      }
-
-      // Stop at structural characters
+      // Stop at structural tokens
       if (
-        c === "{" ||
-        c === "}" ||
-        c === "(" ||
-        c === ")" ||
-        c === "\n" ||
-        c === "." ||
-        c === ":" ||
-        c === "*" ||
-        c === "+" ||
-        c === "~" ||
-        c === ">" ||
-        c === "@" ||
-        c === "`"
+        char === "{" ||
+        char === "}" ||
+        char === ";" ||
+        char === "=" ||
+        char === '"' ||
+        char === "`" ||
+        char === "\n"
       ) {
         break;
       }
 
-      // Stop at identifier start (so identifiers get properly tokenized)
-      if (this.isIdentifierStart(c)) {
+      // Stop at comment start
+      if (char === "/" && (this.peekNext() === "*" || this.peekNext() === "/")) {
         break;
       }
 
-      // Check for !important
-      if (c === "!" && this.matchAhead("!important")) {
-        break;
-      }
-
-      // Check for comments
-      if (c === "/" && (this.peekNext() === "/" || this.peekNext() === "*")) {
+      // Stop at whitespace to let it be tokenized separately
+      // (so prose is broken into chunks for better source mapping)
+      if (char === " " || char === "\t" || char === "\r") {
         break;
       }
 
@@ -416,7 +453,7 @@ class Lexer {
 
     const value = this.source.slice(start, this.pos);
     if (value.length > 0) {
-      this.addTokenAt("prose", value, start);
+      this.addToken("text", value);
     }
   }
 
@@ -425,145 +462,106 @@ class Lexer {
   // =========================================================================
 
   /**
-   * Check if we've reached the end of the source.
+   * Check if we've reached the end of source.
    */
   private isAtEnd(): boolean {
     return this.pos >= this.source.length;
   }
 
   /**
-   * Peek at the current character without consuming it.
+   * Peek at current character.
    */
-  private peek(): string {
-    if (this.isAtEnd()) return "\0";
-    return this.source[this.pos];
-  }
-
-  /**
-   * Peek at the next character without consuming it.
-   */
-  private peekNext(): string {
-    if (this.pos + 1 >= this.source.length) return "\0";
-    return this.source[this.pos + 1];
-  }
-
-  /**
-   * Peek at a character at a specific offset from current position.
-   */
-  private peekAt(offset: number): string {
-    if (this.pos + offset >= this.source.length) return "\0";
+  private peek(offset: number = 0): string {
+    if (this.pos + offset >= this.source.length) {
+      return "\0";
+    }
     return this.source[this.pos + offset];
   }
 
   /**
-   * Advance to the next character and return the current one.
+   * Peek at next character.
+   */
+  private peekNext(): string {
+    return this.peek(1);
+  }
+
+  /**
+   * Peek at previous character.
+   */
+  private peekPrev(): string {
+    if (this.pos <= 0) {
+      return "\0";
+    }
+    return this.source[this.pos - 1];
+  }
+
+  /**
+   * Advance to next character.
    */
   private advance(): string {
-    const c = this.source[this.pos];
+    const char = this.source[this.pos];
     this.pos++;
-
-    if (c === "\n") {
-      this.line++;
-      this.column = 1;
-    } else {
-      this.column++;
-    }
-
-    return c;
+    this.column++;
+    return char;
   }
 
   /**
-   * Check if a character can start an identifier.
+   * Check if character is a digit.
    */
-  private isIdentifierStart(c: string): boolean {
+  private isDigit(char: string): boolean {
+    return char >= "0" && char <= "9";
+  }
+
+  /**
+   * Check if character can start an identifier.
+   */
+  private isIdentifierStart(char: string): boolean {
     return (
-      (c >= "a" && c <= "z") ||
-      (c >= "A" && c <= "Z") ||
-      c === "_"
+      (char >= "a" && char <= "z") ||
+      (char >= "A" && char <= "Z") ||
+      char === "_"
     );
   }
 
   /**
-   * Check if a character can be part of an identifier.
+   * Check if character can be part of an identifier.
    */
-  private isIdentifierChar(c: string): boolean {
+  private isIdentifierChar(char: string): boolean {
     return (
-      (c >= "a" && c <= "z") ||
-      (c >= "A" && c <= "Z") ||
-      (c >= "0" && c <= "9") ||
-      c === "_"
+      this.isIdentifierStart(char) ||
+      this.isDigit(char) ||
+      char === "-" // allow hyphens in module names like 'email-service'
     );
   }
 
   /**
-   * Check if the source ahead matches a given string.
-   */
-  private matchAhead(expected: string): boolean {
-    for (let i = 0; i < expected.length; i++) {
-      if (this.pos + i >= this.source.length) return false;
-      if (this.source[this.pos + i] !== expected[i]) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Add a token at the current position.
+   * Add a token.
    */
   private addToken(type: TokenType, value: string): void {
     this.tokens.push({
       type,
       value,
-      location: this.makeLocation(this.pos - value.length),
+      location: {
+        file: this.filename,
+        line: this.line,
+        column: this.column - value.length,
+        offset: this.pos - value.length,
+      },
     });
   }
 
   /**
-   * Add a token at a specific starting position.
+   * Add a lexer error.
    */
-  private addTokenAt(type: TokenType, value: string, start: number): void {
-    this.tokens.push({
-      type,
-      value,
-      location: this.makeLocationAt(start),
+  private addError(message: string, offset: number): void {
+    this.errors.push({
+      message,
+      location: {
+        file: this.filename,
+        line: this.line,
+        column: this.column,
+        offset,
+      },
     });
-  }
-
-  /**
-   * Create a source location at a specific offset.
-   */
-  private makeLocationAt(offset: number): SourceLocation {
-    // Calculate line and column for the given offset
-    let line = 1;
-    let column = 1;
-
-    for (let i = 0; i < offset; i++) {
-      if (this.source[i] === "\n") {
-        line++;
-        column = 1;
-      } else {
-        column++;
-      }
-    }
-
-    return {
-      file: this.filename,
-      line,
-      column,
-      offset,
-    };
-  }
-
-  /**
-   * Create a source location from an offset.
-   */
-  private makeLocation(offset: number): SourceLocation {
-    return this.makeLocationAt(offset);
-  }
-
-  /**
-   * Add an error to the errors list.
-   */
-  private addError(message: string, location: SourceLocation): void {
-    this.errors.push({ message, location });
   }
 }

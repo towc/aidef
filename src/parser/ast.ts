@@ -2,8 +2,14 @@
  * AIDef AST Parser
  *
  * Parses tokens from the lexer into an Abstract Syntax Tree.
- * Handles CSS-like selector syntax with combinators, pseudo-selectors,
- * tags, modules, and prose content.
+ * Uses nginx-like syntax with brace-first block detection.
+ * 
+ * Syntax:
+ * - `name { ... }` - Module block
+ * - `"question?" { ... }` - Query filter block
+ * - `include ./path;` - Import statement
+ * - `param="value";` - Parameter
+ * - Everything else is prose
  */
 
 import type {
@@ -14,14 +20,11 @@ import type {
   ASTNode,
   RootNode,
   ModuleNode,
-  TagBlockNode,
-  UniversalBlockNode,
-  PseudoBlockNode,
+  QueryFilterNode,
   ProseNode,
-  ImportNode,
+  IncludeNode,
+  ParameterNode,
   ParseError,
-  PseudoSelector,
-  Combinator,
 } from "../types/index.js";
 
 export interface ParseResult {
@@ -89,378 +92,270 @@ class Parser {
   }
 
   /**
-   * Parse a top-level element (selector block, import, prose, etc.)
+   * Parse a top-level element.
+   * Uses brace-first detection to distinguish blocks from prose.
    */
   private parseTopLevel(): ASTNode | null {
-    this.skipWhitespaceAndNewlines();
-    this.skipComments();
+    this.skipInsignificant();
 
     if (this.isAtEnd()) {
       return null;
     }
 
-    const token = this.peek();
-
-    // Import: @path
-    if (token.type === "import") {
-      return this.parseImport();
+    // Check for include statement
+    if (this.check("include")) {
+      return this.parseInclude();
     }
 
-    // Try to parse a selector block
-    const selectorResult = this.tryParseSelector();
-    if (selectorResult) {
-      return selectorResult;
+    // Check for query filter: "question?" { }
+    if (this.check("string")) {
+      const stringToken = this.peek();
+      // Look ahead for brace
+      if (this.lookAheadForBrace()) {
+        return this.parseQueryFilter();
+      }
+      // Otherwise it's prose
     }
 
-    // Otherwise, parse as prose
+    // Check for module block: name { }
+    if (this.check("identifier")) {
+      // Look ahead for brace (possibly after parameters pattern)
+      if (this.lookAheadForBrace()) {
+        return this.parseModule();
+      }
+      // Otherwise it's prose
+    }
+
+    // Check for parameter: name="value"; or name=123;
+    if (this.isParameterStart()) {
+      return this.parseParameter();
+    }
+
+    // Everything else is prose
     return this.parseProse();
   }
 
   /**
-   * Try to parse a selector. Returns null if this doesn't look like a selector.
+   * Look ahead to see if there's a `{` coming up (indicating a block).
+   * Skips whitespace, comments, newlines.
    */
-  private tryParseSelector(): ASTNode | null {
-    const startPos = this.pos;
-    const startLocation = this.currentLocation();
-
-    // Parse selector chain (may include combinators)
-    const selectorChain = this.parseSelectorChain();
-
-    if (selectorChain.length === 0) {
-      this.pos = startPos;
-      return null;
-    }
-
-    // After parsing the selector, we need a brace_open
-    this.skipWhitespaceAndNewlines();
-    this.skipComments();
-
-    if (!this.check("brace_open")) {
-      // Not a block, restore position
-      this.pos = startPos;
-      return null;
-    }
-
-    // Consume the opening brace
+  private lookAheadForBrace(): boolean {
+    const savedPos = this.pos;
+    
+    // Skip current token (identifier or string)
     this.advance();
+    
+    // Skip whitespace/comments/newlines
+    this.skipInsignificant();
+    
+    const foundBrace = this.check("brace_open");
+    
+    // Restore position
+    this.pos = savedPos;
+    
+    return foundBrace;
+  }
 
-    // Parse children
+  /**
+   * Check if current position looks like a parameter start: identifier =
+   */
+  private isParameterStart(): boolean {
+    if (!this.check("identifier")) {
+      return false;
+    }
+    
+    const savedPos = this.pos;
+    this.advance(); // skip identifier
+    this.skipWhitespace();
+    const isParam = this.check("equals");
+    this.pos = savedPos;
+    
+    return isParam;
+  }
+
+  /**
+   * Parse an include statement: include ./path;
+   */
+  private parseInclude(): IncludeNode {
+    const startLocation = this.currentLocation();
+    
+    this.advance(); // consume 'include'
+    this.skipWhitespace();
+    
+    // Collect the path (everything until ; or newline)
+    const pathParts: string[] = [];
+    while (!this.isAtEnd() && !this.check("semicolon") && !this.check("newline") && !this.check("brace_open") && !this.check("brace_close")) {
+      const token = this.peek();
+      if (token.type === "whitespace") {
+        // Stop at whitespace unless it's part of the path
+        break;
+      }
+      if (token.type === "comment") {
+        this.advance();
+        continue;
+      }
+      pathParts.push(token.value);
+      this.advance();
+    }
+    
+    const path = pathParts.join("").trim();
+    
+    // Consume optional semicolon
+    if (this.check("semicolon")) {
+      this.advance();
+    }
+    
+    if (!path) {
+      this.addError("Expected path after 'include'", {
+        start: startLocation,
+        end: this.currentLocation(),
+      });
+    }
+    
+    return {
+      type: "include",
+      path,
+      source: {
+        start: startLocation,
+        end: this.previousLocation(),
+      },
+    };
+  }
+
+  /**
+   * Parse a query filter block: "question?" { ... }
+   */
+  private parseQueryFilter(): QueryFilterNode {
+    const startLocation = this.currentLocation();
+    
+    // Get the question string
+    const stringToken = this.advance();
+    const question = this.extractStringContent(stringToken.value);
+    
+    this.skipInsignificant();
+    
+    // Expect opening brace
+    if (!this.check("brace_open")) {
+      this.addError("Expected '{' after query filter question", {
+        start: this.currentLocation(),
+        end: this.currentLocation(),
+      });
+      return {
+        type: "query_filter",
+        question,
+        children: [],
+        source: {
+          start: startLocation,
+          end: this.currentLocation(),
+        },
+      };
+    }
+    
+    this.advance(); // consume '{'
+    
+    // Parse block content
     const children = this.parseBlockContent();
-
+    
     // Expect closing brace
-    this.skipWhitespaceAndNewlines();
-    this.skipComments();
-
-    const endLocation = this.currentLocation();
-
+    this.skipInsignificant();
     if (this.check("brace_close")) {
       this.advance();
     } else {
-      this.addError("Expected closing brace '}'", {
-        start: endLocation,
-        end: endLocation,
+      this.addError("Expected '}'", {
+        start: this.currentLocation(),
+        end: this.currentLocation(),
       });
     }
-
-    // Build the AST node(s) from the selector chain
-    // The last selector in the chain becomes the actual block node,
-    // with earlier selectors becoming parent nodes
-    return this.buildSelectorTree(selectorChain, children, {
-      start: startLocation,
-      end: this.previousLocation(),
-    });
+    
+    return {
+      type: "query_filter",
+      question,
+      children,
+      source: {
+        start: startLocation,
+        end: this.previousLocation(),
+      },
+    };
   }
 
   /**
-   * Parse a selector chain, handling combinators.
-   * Returns an array of parsed selectors with their combinators.
+   * Parse a module block: name { ... }
    */
-  private parseSelectorChain(): SelectorPart[] {
-    const parts: SelectorPart[] = [];
-    let expectCombinator = false;
-
-    while (!this.isAtEnd()) {
-      this.skipComments();
-
-      // Check for combinators
-      const combinator = this.parseCombinator(expectCombinator);
-
-      // After a combinator, we need another selector
-      if (combinator) {
-        if (parts.length === 0) {
-          // Combinator at start - invalid
-          break;
-        }
-        // The combinator attaches to the next selector
-      }
-
-      this.skipComments();
-
-      // Try to parse a selector
-      const selector = this.parseSingleSelector();
-
-      if (!selector) {
-        if (combinator) {
-          // Had a combinator but no following selector
-          this.addError("Expected selector after combinator", {
-            start: this.currentLocation(),
-            end: this.currentLocation(),
-          });
-        }
-        break;
-      }
-
-      if (combinator) {
-        selector.combinator = combinator;
-      } else if (parts.length > 0 && !combinator) {
-        // No explicit combinator between selectors = descendant
-        selector.combinator = "descendant";
-      }
-
-      parts.push(selector);
-      expectCombinator = true;
-
-      // Check if there's more to parse
-      this.skipWhitespaceOnly();
-      this.skipComments();
-
-      // If we see a brace, we're done
-      if (this.check("brace_open") || this.check("brace_close")) {
-        break;
-      }
-
-      // If we see EOF, newline at top-level context, or something that's not a selector start
-      if (this.isAtEnd()) {
-        break;
-      }
-    }
-
-    return parts;
-  }
-
-  /**
-   * Parse a combinator if present.
-   */
-  private parseCombinator(expectCombinator: boolean): Combinator | undefined {
-    this.skipWhitespaceOnly();
-    this.skipComments();
-
-    const token = this.peek();
-
-    if (token.type === "gt") {
-      this.advance();
-      this.skipWhitespaceOnly();
-      return "child";
-    }
-
-    if (token.type === "plus") {
-      this.advance();
-      this.skipWhitespaceOnly();
-      return "adjacent";
-    }
-
-    if (token.type === "tilde") {
-      this.advance();
-      this.skipWhitespaceOnly();
-      return "general";
-    }
-
-    // Descendant combinator is implicit (just whitespace)
-    // We don't return it here - it's handled in parseSelectorChain
-    return undefined;
-  }
-
-  /**
-   * Parse a single selector (module name, tags, universal, or pseudo-only).
-   */
-  private parseSingleSelector(): SelectorPart | null {
+  private parseModule(): ModuleNode {
     const startLocation = this.currentLocation();
-    this.skipComments();
-
-    const token = this.peek();
-
-    // Universal selector: *
-    if (token.type === "star") {
-      this.advance();
-      const pseudos = this.parsePseudoSelectors();
-      return {
-        kind: "universal",
-        pseudos,
-        startLocation,
-      };
-    }
-
-    // Pseudo-only selector: :leaf, :root
-    if (token.type === "colon") {
-      const pseudos = this.parsePseudoSelectors();
-      if (pseudos.length > 0) {
-        // Check if this is a standalone pseudo block (like :leaf, :root)
-        // vs a pseudo attached to something else
-        return {
-          kind: "pseudo_only",
-          pseudo: pseudos[0],
-          additionalPseudos: pseudos.slice(1),
-          startLocation,
-        };
-      }
-      return null;
-    }
-
-    // Tag-only selector: .tag or .tag1.tag2
-    if (token.type === "dot") {
-      const tags = this.parseTags();
-      if (tags.length > 0) {
-        const pseudos = this.parsePseudoSelectors();
-        return {
-          kind: "tag_only",
-          tags,
-          pseudos,
-          startLocation,
-        };
-      }
-      return null;
-    }
-
-    // Module selector: name or name.tag
-    if (token.type === "identifier") {
-      const name = token.value;
-      this.advance();
-
-      const tags = this.parseTags();
-      const pseudos = this.parsePseudoSelectors();
-
-      return {
-        kind: "module",
-        name,
-        tags,
-        pseudos,
-        startLocation,
-      };
-    }
-
-    return null;
-  }
-
-  /**
-   * Parse tags (.tag1.tag2).
-   */
-  private parseTags(): string[] {
-    const tags: string[] = [];
-
-    // Skip any whitespace/comments before tags
+    
+    // Get the module name
+    const nameToken = this.advance();
+    const name = nameToken.value;
+    
     this.skipInsignificant();
-
-    while (this.check("dot")) {
-      this.advance(); // consume '.'
-      this.skipInsignificant();
-      if (this.check("identifier")) {
-        tags.push(this.peek().value);
-        this.advance();
-        this.skipInsignificant();
-      } else {
-        this.addError("Expected tag name after '.'", {
-          start: this.currentLocation(),
+    
+    // Expect opening brace
+    if (!this.check("brace_open")) {
+      this.addError("Expected '{' after module name", {
+        start: this.currentLocation(),
+        end: this.currentLocation(),
+      });
+      return {
+        type: "module",
+        name,
+        parameters: [],
+        children: [],
+        source: {
+          start: startLocation,
           end: this.currentLocation(),
-        });
-        break;
-      }
+        },
+      };
     }
-
-    return tags;
-  }
-
-  /**
-   * Skip whitespace and comments (but not newlines in some contexts).
-   */
-  private skipInsignificant(): void {
-    while (this.check("whitespace") || this.check("comment")) {
-      this.advance();
-    }
-  }
-
-  /**
-   * Parse pseudo-selectors (:has(x), :not(y), :leaf, etc.).
-   * Only consumes if we see :identifier pattern.
-   */
-  private parsePseudoSelectors(): PseudoSelector[] {
-    const pseudos: PseudoSelector[] = [];
-
-    while (this.check("colon")) {
-      // Look ahead to see if this is actually a pseudo-selector
-      // A pseudo-selector is : followed by an identifier
-      const nextPos = this.pos + 1;
-      if (nextPos >= this.tokens.length || this.tokens[nextPos].type !== "identifier") {
-        // Not a pseudo-selector, stop
-        break;
-      }
-
-      this.advance(); // consume ':'
-
-      const name = this.peek().value;
-      this.advance();
-
-      // Check for arguments: :has(x, y)
-      let args: string[] | undefined;
-      if (this.check("paren_open")) {
-        this.advance(); // consume '('
-        args = this.parsePseudoArgs();
-
-        if (this.check("paren_close")) {
-          this.advance(); // consume ')'
-        } else {
-          this.addError("Expected ')' after pseudo-selector arguments", {
-            start: this.currentLocation(),
-            end: this.currentLocation(),
-          });
-        }
-      }
-
-      pseudos.push({ name, args });
-    }
-
-    return pseudos;
-  }
-
-  /**
-   * Parse arguments inside a pseudo-selector: :has(arg1, arg2).
-   */
-  private parsePseudoArgs(): string[] {
-    const args: string[] = [];
-
-    while (!this.isAtEnd() && !this.check("paren_close")) {
-      this.skipWhitespaceAndNewlines();
-
-      if (this.check("identifier")) {
-        args.push(this.peek().value);
-        this.advance();
-      } else if (this.check("paren_close")) {
-        break;
+    
+    this.advance(); // consume '{'
+    
+    // Parse block content
+    const children = this.parseBlockContent();
+    
+    // Extract parameters from children
+    const parameters: ParameterNode[] = [];
+    const nonParamChildren: ASTNode[] = [];
+    
+    for (const child of children) {
+      if (child.type === "parameter") {
+        parameters.push(child);
       } else {
-        // Skip unexpected token
-        this.advance();
-      }
-
-      this.skipWhitespaceAndNewlines();
-
-      // Handle comma separator (not tokenized, so we look for identifiers)
-      // Actually, commas would become prose tokens, skip them
-      if (this.check("prose") && this.peek().value.includes(",")) {
-        this.advance();
+        nonParamChildren.push(child);
       }
     }
-
-    return args;
+    
+    // Expect closing brace
+    this.skipInsignificant();
+    if (this.check("brace_close")) {
+      this.advance();
+    } else {
+      this.addError("Expected '}'", {
+        start: this.currentLocation(),
+        end: this.currentLocation(),
+      });
+    }
+    
+    return {
+      type: "module",
+      name,
+      parameters,
+      children: nonParamChildren,
+      source: {
+        start: startLocation,
+        end: this.previousLocation(),
+      },
+    };
   }
 
   /**
-   * Parse the content inside a block (between { and }).
+   * Parse content inside a block (between { and }).
    */
   private parseBlockContent(): ASTNode[] {
     const children: ASTNode[] = [];
 
     while (!this.isAtEnd()) {
-      this.skipWhitespaceAndNewlines();
-      this.skipComments();
+      this.skipInsignificant();
 
       if (this.check("brace_close")) {
         break;
@@ -488,71 +383,117 @@ class Parser {
    * Parse a single element inside a block.
    */
   private parseBlockElement(): ASTNode | null {
-    this.skipWhitespaceAndNewlines();
-    this.skipComments();
+    this.skipInsignificant();
 
     if (this.isAtEnd() || this.check("brace_close")) {
       return null;
     }
 
-    const token = this.peek();
-
-    // Import
-    if (token.type === "import") {
-      return this.parseImport();
+    // Include statement
+    if (this.check("include")) {
+      return this.parseInclude();
     }
 
-    // Try to parse a nested selector block
-    const selectorResult = this.tryParseSelector();
-    if (selectorResult) {
-      return selectorResult;
+    // Query filter: "question?" { }
+    if (this.check("string") && this.lookAheadForBrace()) {
+      return this.parseQueryFilter();
     }
 
-    // Otherwise, parse as prose
+    // Nested module: name { }
+    if (this.check("identifier") && this.lookAheadForBrace()) {
+      return this.parseModule();
+    }
+
+    // Parameter: name="value"; or name=123;
+    if (this.isParameterStart()) {
+      return this.parseParameter();
+    }
+
+    // Prose
     return this.parseProse();
   }
 
   /**
-   * Parse an import node.
+   * Parse a parameter: name="value"; or name=123;
    */
-  private parseImport(): ImportNode {
-    const token = this.peek();
-    const startLocation = token.location;
-
-    // Import value includes the @ sign, strip it
-    const path = token.value.startsWith("@")
-      ? token.value.slice(1)
-      : token.value;
-
-    this.advance();
-
+  private parseParameter(): ParameterNode {
+    const startLocation = this.currentLocation();
+    
+    // Get parameter name
+    const nameToken = this.advance();
+    const name = nameToken.value;
+    
+    this.skipWhitespace();
+    
+    // Expect =
+    if (!this.check("equals")) {
+      this.addError("Expected '=' in parameter", {
+        start: this.currentLocation(),
+        end: this.currentLocation(),
+      });
+      return {
+        type: "parameter",
+        name,
+        value: "",
+        source: {
+          start: startLocation,
+          end: this.currentLocation(),
+        },
+      };
+    }
+    
+    this.advance(); // consume '='
+    this.skipWhitespace();
+    
+    // Get value (string or number)
+    let value: string | number = "";
+    
+    if (this.check("string")) {
+      const stringToken = this.advance();
+      value = this.extractStringContent(stringToken.value);
+    } else if (this.check("number")) {
+      const numberToken = this.advance();
+      value = parseFloat(numberToken.value);
+    } else if (this.check("identifier")) {
+      // Allow bare identifiers as values
+      const identToken = this.advance();
+      value = identToken.value;
+    } else {
+      this.addError("Expected string or number value for parameter", {
+        start: this.currentLocation(),
+        end: this.currentLocation(),
+      });
+    }
+    
+    // Consume optional semicolon
+    this.skipWhitespace();
+    if (this.check("semicolon")) {
+      this.advance();
+    }
+    
     return {
-      type: "import",
-      path,
+      type: "parameter",
+      name,
+      value,
       source: {
         start: startLocation,
-        end: this.makeEndLocation(startLocation, token.value.length),
+        end: this.previousLocation(),
       },
     };
   }
 
   /**
-   * Parse prose content (text, code blocks, !important).
+   * Parse prose content.
    */
   private parseProse(): ProseNode | null {
     const startLocation = this.currentLocation();
     const parts: string[] = [];
-    let important = false;
 
     while (!this.isAtEnd()) {
       const token = this.peek();
 
-      // Stop conditions
-      if (
-        token.type === "brace_open" ||
-        token.type === "brace_close" ||
-        token.type === "eof"
-      ) {
+      // Stop at block boundaries
+      if (token.type === "brace_open" || token.type === "brace_close") {
         break;
       }
 
@@ -562,40 +503,44 @@ class Parser {
         continue;
       }
 
-      // Check for !important
-      if (token.type === "important") {
-        important = true;
+      // Stop at include keyword (it's a statement)
+      if (token.type === "include") {
+        break;
+      }
+
+      // Check for query filter start
+      if (token.type === "string" && this.lookAheadForBrace()) {
+        break;
+      }
+
+      // Check for module start
+      if (token.type === "identifier" && this.lookAheadForBrace()) {
+        break;
+      }
+
+      // Check for parameter start
+      if (this.isParameterStart()) {
+        break;
+      }
+
+      // Semicolon ends current prose statement
+      if (token.type === "semicolon") {
         this.advance();
         break;
       }
 
-      // Check if this looks like a selector start followed by a block
-      // We need to look ahead to see if there's a block, without adding errors
-      if (this.looksLikeSelectorStart()) {
-        if (this.looksLikeSelectorBlock()) {
-          // It is a selector, stop prose parsing here
-          break;
-        }
-      }
-
-      // Collect the token as prose
-      if (token.type === "whitespace") {
-        parts.push(token.value);
-      } else if (token.type === "newline") {
-        // A newline might indicate end of prose in certain contexts
-        // For now, include it but check for selector after
-        parts.push(token.value);
-      } else if (token.type === "identifier") {
-        parts.push(token.value);
-      } else if (token.type === "prose") {
-        parts.push(token.value);
-      } else if (token.type === "code_block" || token.type === "inline_code") {
-        parts.push(token.value);
-      } else if (token.type === "import") {
-        // An import in prose context should break
-        break;
-      } else {
-        // Other tokens (operators, etc.) become part of prose
+      // Collect token value
+      if (
+        token.type === "text" ||
+        token.type === "identifier" ||
+        token.type === "string" ||
+        token.type === "number" ||
+        token.type === "whitespace" ||
+        token.type === "newline" ||
+        token.type === "code_block" ||
+        token.type === "inline_code" ||
+        token.type === "equals"  // standalone = becomes prose
+      ) {
         parts.push(token.value);
       }
 
@@ -605,14 +550,13 @@ class Parser {
     // Trim and clean up the content
     const content = parts.join("").trim();
 
-    if (content.length === 0 && !important) {
+    if (content.length === 0) {
       return null;
     }
 
     return {
       type: "prose",
       content,
-      important,
       source: {
         start: startLocation,
         end: this.previousLocation(),
@@ -621,187 +565,15 @@ class Parser {
   }
 
   /**
-   * Check if current position looks like the start of a selector.
+   * Extract content from a string token (remove quotes and handle escapes).
    */
-  private looksLikeSelectorStart(): boolean {
-    const token = this.peek();
-    return (
-      token.type === "identifier" ||
-      token.type === "dot" ||
-      token.type === "star" ||
-      token.type === "colon"
-    );
-  }
-
-  /**
-   * Look ahead to check if we have a selector followed by a block.
-   * This is a quick check without full parsing (no side effects).
-   */
-  private looksLikeSelectorBlock(): boolean {
-    const savedPos = this.pos;
-    let braceDepth = 0;
-
-    // Skip tokens that could be part of a selector
-    while (!this.isAtEnd()) {
-      const token = this.peek();
-
-      if (token.type === "brace_open") {
-        // Found opening brace - this looks like a selector block
-        this.pos = savedPos;
-        return true;
-      }
-
-      if (
-        token.type === "brace_close" ||
-        token.type === "newline" ||
-        token.type === "eof"
-      ) {
-        // Hit something that can't be part of a single-line selector
-        // before finding a brace
-        break;
-      }
-
-      // Keep track of parens for pseudo-selectors like :has(x)
-      if (token.type === "paren_open") {
-        braceDepth++;
-      } else if (token.type === "paren_close") {
-        braceDepth--;
-      }
-
-      // Skip tokens that could be part of a selector
-      if (
-        token.type === "identifier" ||
-        token.type === "dot" ||
-        token.type === "colon" ||
-        token.type === "star" ||
-        token.type === "gt" ||
-        token.type === "plus" ||
-        token.type === "tilde" ||
-        token.type === "paren_open" ||
-        token.type === "paren_close" ||
-        token.type === "whitespace" ||
-        token.type === "comment"
-      ) {
-        this.advance();
-        continue;
-      }
-
-      // Hit something unexpected for a selector
-      break;
+  private extractStringContent(str: string): string {
+    // Remove surrounding quotes
+    if (str.startsWith('"') && str.endsWith('"')) {
+      str = str.slice(1, -1);
     }
-
-    this.pos = savedPos;
-    return false;
-  }
-
-  /**
-   * Build a tree of nodes from a selector chain.
-   * The last selector in the chain gets the children.
-   */
-  private buildSelectorTree(
-    chain: SelectorPart[],
-    children: ASTNode[],
-    sourceRange: SourceRange
-  ): ASTNode {
-    if (chain.length === 0) {
-      // Should not happen, but handle gracefully
-      return {
-        type: "module",
-        name: "unknown",
-        tags: [],
-        pseudos: [],
-        children,
-        source: sourceRange,
-      };
-    }
-
-    // Build from the end backwards
-    // The last selector gets the children directly
-    let currentNode = this.selectorPartToNode(
-      chain[chain.length - 1],
-      children,
-      sourceRange
-    );
-
-    // Each previous selector wraps the current as its child
-    for (let i = chain.length - 2; i >= 0; i--) {
-      currentNode = this.selectorPartToNode(
-        chain[i],
-        [currentNode],
-        sourceRange
-      );
-    }
-
-    return currentNode;
-  }
-
-  /**
-   * Convert a SelectorPart to an ASTNode.
-   */
-  private selectorPartToNode(
-    part: SelectorPart,
-    children: ASTNode[],
-    sourceRange: SourceRange
-  ): ASTNode {
-    const partSource: SourceRange = {
-      start: part.startLocation,
-      end: sourceRange.end,
-    };
-
-    switch (part.kind) {
-      case "module":
-        const moduleNode: ModuleNode = {
-          type: "module",
-          name: part.name!,
-          tags: part.tags || [],
-          pseudos: part.pseudos || [],
-          children,
-          source: partSource,
-        };
-        if (part.combinator) {
-          moduleNode.combinator = part.combinator;
-        }
-        return moduleNode;
-
-      case "tag_only":
-        const tagNode: TagBlockNode = {
-          type: "tag_block",
-          tags: part.tags || [],
-          pseudos: part.pseudos || [],
-          children,
-          source: partSource,
-        };
-        return tagNode;
-
-      case "universal":
-        const universalNode: UniversalBlockNode = {
-          type: "universal_block",
-          pseudos: part.pseudos || [],
-          children,
-          source: partSource,
-        };
-        return universalNode;
-
-      case "pseudo_only":
-        const pseudoNode: PseudoBlockNode = {
-          type: "pseudo_block",
-          pseudo: part.pseudo!,
-          children,
-          source: partSource,
-        };
-        return pseudoNode;
-
-      default:
-        // Fallback
-        return {
-          type: "module",
-          name: "unknown",
-          tags: [],
-          pseudos: [],
-          children,
-          source: partSource,
-        };
-    }
+    // Handle escape sequences
+    return str.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
   }
 
   // =========================================================================
@@ -857,28 +629,23 @@ class Parser {
   }
 
   /**
-   * Skip whitespace tokens only (not newlines).
+   * Skip whitespace tokens only.
    */
-  private skipWhitespaceOnly(): void {
+  private skipWhitespace(): void {
     while (this.check("whitespace")) {
       this.advance();
     }
   }
 
   /**
-   * Skip whitespace and newline tokens.
+   * Skip whitespace, newlines, and comments.
    */
-  private skipWhitespaceAndNewlines(): void {
-    while (this.check("whitespace") || this.check("newline")) {
-      this.advance();
-    }
-  }
-
-  /**
-   * Skip comment tokens.
-   */
-  private skipComments(): void {
-    while (this.check("comment")) {
+  private skipInsignificant(): void {
+    while (
+      this.check("whitespace") ||
+      this.check("newline") ||
+      this.check("comment")
+    ) {
       this.advance();
     }
   }
@@ -896,22 +663,14 @@ class Parser {
   private previousLocation(): SourceLocation {
     if (this.pos > 0) {
       const prevToken = this.tokens[this.pos - 1];
-      return this.makeEndLocation(prevToken.location, prevToken.value.length);
+      return {
+        file: prevToken.location.file,
+        line: prevToken.location.line,
+        column: prevToken.location.column + prevToken.value.length,
+        offset: prevToken.location.offset + prevToken.value.length,
+      };
     }
     return this.currentLocation();
-  }
-
-  /**
-   * Create an end location from a start location and length.
-   */
-  private makeEndLocation(start: SourceLocation, length: number): SourceLocation {
-    // Simple approximation - doesn't handle multi-line
-    return {
-      file: start.file,
-      line: start.line,
-      column: start.column + length,
-      offset: start.offset + length,
-    };
   }
 
   /**
@@ -924,19 +683,4 @@ class Parser {
       severity: "error",
     });
   }
-}
-
-// =========================================================================
-// Internal Types
-// =========================================================================
-
-interface SelectorPart {
-  kind: "module" | "tag_only" | "universal" | "pseudo_only";
-  name?: string;
-  tags?: string[];
-  pseudos?: PseudoSelector[];
-  pseudo?: PseudoSelector;
-  additionalPseudos?: PseudoSelector[];
-  combinator?: Combinator;
-  startLocation: SourceLocation;
 }

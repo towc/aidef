@@ -2,8 +2,7 @@
  * AIDef Type Definitions
  * 
  * This file defines all shared interfaces for the AIDef compiler.
- * Teams can work on different modules in parallel as long as they
- * respect these interface contracts.
+ * Updated for nginx-like syntax (not CSS-like).
  */
 
 // =============================================================================
@@ -28,24 +27,19 @@ export interface SourceRange {
 
 export type TokenType =
   | 'identifier'      // server, auth, myModule
+  | 'string'          // "..." (for query filters and param values)
+  | 'number'          // 123 (for param values like priority=1)
   | 'brace_open'      // {
   | 'brace_close'     // }
-  | 'paren_open'      // (
-  | 'paren_close'     // )
-  | 'dot'             // .
-  | 'colon'           // :
-  | 'star'            // *
-  | 'plus'            // +
-  | 'tilde'           // ~
-  | 'gt'              // >
-  | 'import'          // @path (the whole @path as one token)
-  | 'important'       // !important
+  | 'semicolon'       // ;
+  | 'equals'          // =
+  | 'include'         // include keyword
   | 'comment'         // /* */ or //
   | 'code_block'      // ```...```
   | 'inline_code'     // `...`
-  | 'prose'           // plain text content
+  | 'text'            // plain text content (prose)
   | 'newline'         // \n
-  | 'whitespace'      // spaces/tabs (usually skipped)
+  | 'whitespace'      // spaces/tabs
   | 'eof';            // end of file
 
 export interface Token {
@@ -65,18 +59,16 @@ export interface LexerError {
 }
 
 // =============================================================================
-// AST Types
+// AST Types (nginx-like syntax)
 // =============================================================================
 
 export type ASTNode =
   | RootNode
   | ModuleNode
-  | TagBlockNode
-  | UniversalBlockNode
-  | PseudoBlockNode
+  | QueryFilterNode
   | ProseNode
-  | ImportNode
-  | ConstraintNode;
+  | IncludeNode
+  | ParameterNode;
 
 export interface RootNode {
   type: 'root';
@@ -84,69 +76,56 @@ export interface RootNode {
   source: SourceRange;
 }
 
+/**
+ * A module block: `name { ... }`
+ */
 export interface ModuleNode {
   type: 'module';
   name: string;
-  tags: string[];                    // .tag1.tag2 attached to module
-  pseudos: PseudoSelector[];         // :has(), :not(), etc.
-  combinator?: Combinator;           // how it relates to parent
+  parameters: ParameterNode[];       // leaf="reason", path="./src", etc.
   children: ASTNode[];
   source: SourceRange;
 }
 
-export interface TagBlockNode {
-  type: 'tag_block';
-  tags: string[];                    // .tag1.tag2
-  pseudos: PseudoSelector[];
+/**
+ * A query filter block: `"is this a database?" { ... }`
+ * The question is evaluated by LLM for each module.
+ */
+export interface QueryFilterNode {
+  type: 'query_filter';
+  question: string;                  // The question to ask the LLM
   children: ASTNode[];
   source: SourceRange;
 }
 
-export interface UniversalBlockNode {
-  type: 'universal_block';           // * { }
-  pseudos: PseudoSelector[];
-  children: ASTNode[];
-  source: SourceRange;
-}
-
-export interface PseudoBlockNode {
-  type: 'pseudo_block';              // :leaf { }, :root { }
-  pseudo: PseudoSelector;
-  children: ASTNode[];
-  source: SourceRange;
-}
-
+/**
+ * Prose content (natural language specification).
+ */
 export interface ProseNode {
   type: 'prose';
   content: string;
-  important: boolean;                // ends with !important
   source: SourceRange;
 }
 
-export interface ImportNode {
-  type: 'import';
-  path: string;                      // ./file or ./file.aid or url
+/**
+ * Include statement: `include ./path;`
+ */
+export interface IncludeNode {
+  type: 'include';
+  path: string;                      // ./file or ./file.aid
   resolved?: ResolvedImport;         // filled in during import resolution
   source: SourceRange;
 }
 
-export interface ConstraintNode {
-  type: 'constraint';
-  content: string;
-  important: boolean;
+/**
+ * Parameter: `name="value";` or `name=123;`
+ * Used for module metadata like leaf, never, optional, path, priority, model.
+ */
+export interface ParameterNode {
+  type: 'parameter';
+  name: string;
+  value: string | number;
   source: SourceRange;
-}
-
-// Selector components
-export type Combinator = 
-  | 'descendant'     // space: parent child
-  | 'child'          // >: parent > child
-  | 'adjacent'       // +: sibling + sibling
-  | 'general';       // ~: sibling ~ sibling
-
-export interface PseudoSelector {
-  name: string;                      // 'leaf', 'root', 'has', 'not', 'or'
-  args?: string[];                   // for :has(x), :not(x), :or(a, b)
 }
 
 // =============================================================================
@@ -174,6 +153,25 @@ export interface ParseError {
 }
 
 // =============================================================================
+// Recognized Parameters
+// =============================================================================
+
+/**
+ * Parameters that AIDef recognizes and acts on.
+ * Unrecognized parameters trigger a warning but are passed to the AI.
+ */
+export const RECOGNIZED_PARAMETERS = [
+  'leaf',       // leaf="reason" - don't subdivide this module
+  'never',      // never="reason" - forbid this submodule
+  'optional',   // optional="reason" - may be skipped
+  'priority',   // priority=1 - compilation order (lower first)
+  'path',       // path="./src" - output path override
+  'model',      // model="opus" - LLM model override
+] as const;
+
+export type RecognizedParameter = typeof RECOGNIZED_PARAMETERS[number];
+
+// =============================================================================
 // Compiled Node Types (output of compilation phase)
 // =============================================================================
 
@@ -189,12 +187,14 @@ export interface CompiledNode {
   children: string[];                // child module names
   isLeaf: boolean;                   // no children = leaf
   
+  // Parameters
+  parameters: Record<string, string | number>;
+  
   // Extracted metadata
   interfaces: InterfaceDeclaration[];
   constraints: Constraint[];
   suggestions: Suggestion[];
   utilities: UtilityDeclaration[];
-  tags: string[];
 }
 
 export interface InterfaceDeclaration {
@@ -206,7 +206,6 @@ export interface InterfaceDeclaration {
 export interface Constraint {
   rule: string;
   source: string;                    // which node declared this
-  important: boolean;
 }
 
 export interface Suggestion {
@@ -244,25 +243,26 @@ export interface SourceOrigin {
 export interface NodeContext {
   module: string;
   ancestry: string[];
-  tags: string[];
+  
+  // Parameters from this node and ancestors
+  parameters: Record<string, string | number>;
   
   interfaces: Record<string, {
     source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin (new)
+    sourceOrigin?: SourceOrigin; // detailed origin
     definition: string;
   }>;
   
   constraints: Array<{
     rule: string;
     source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin (new)
-    important: boolean;
+    sourceOrigin?: SourceOrigin; // detailed origin
   }>;
   
   suggestions: Array<{
     rule: string;
     source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin (new)
+    sourceOrigin?: SourceOrigin; // detailed origin
   }>;
   
   utilities: Array<{
@@ -270,14 +270,14 @@ export interface NodeContext {
     signature: string;
     location: string;
     source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin (new)
+    sourceOrigin?: SourceOrigin; // detailed origin
   }>;
   
-  conventions: Array<{
-    rule: string;
-    source: string;              // module path (legacy)
-    sourceOrigin?: SourceOrigin; // detailed origin (new)
-    selector: string;            // which selector matched
+  // Query filters that matched this module
+  queryFilters: Array<{
+    question: string;
+    content: string;             // the prose inside the filter block
+    sourceOrigin?: SourceOrigin;
   }>;
 }
 
@@ -349,7 +349,6 @@ export interface ChildSpec {
   name: string;
   isLeaf: boolean;
   spec: string;                      // content for child's .aidg
-  tags: string[];
 }
 
 export interface GenerateRequest {
@@ -399,7 +398,7 @@ export interface CallLogEntry {
 // =============================================================================
 
 export interface CLIOptions {
-  command: 'run' | 'browse' | 'build' | 'auth' | 'estimate';
+  command: 'run' | 'browse' | 'build' | 'auth' | 'estimate' | 'analyze';
   rootPath: string;
   verbose: boolean;
   maxCost?: number;

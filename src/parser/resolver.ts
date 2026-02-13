@@ -1,19 +1,21 @@
 /**
  * AIDef Import Resolver
  *
- * Resolves @import statements in .aid files by:
+ * Resolves `include` statements in .aid files by:
  * 1. Parsing referenced .aid files recursively
  * 2. Inlining non-.aid files as prose content
  * 3. Detecting circular imports
  * 4. Merging imported ASTs into the parent AST
  */
 
-import { resolve as resolvePath, dirname, join, isAbsolute } from "node:path";
+import { resolve as resolvePath, dirname, isAbsolute } from "node:path";
 import type {
   RootNode,
   ASTNode,
-  ImportNode,
+  IncludeNode,
   ProseNode,
+  ModuleNode,
+  QueryFilterNode,
   ResolvedImport,
   ResolvedSpec,
   ParseError,
@@ -141,8 +143,8 @@ class ImportResolver {
     const result: ASTNode[] = [];
 
     for (const child of children) {
-      if (child.type === "import") {
-        const resolved = await this.resolveImport(child, currentBasePath);
+      if (child.type === "include") {
+        const resolved = await this.resolveInclude(child, currentBasePath);
         result.push(...resolved);
       } else if (this.hasChildren(child)) {
         // Recursively resolve imports in nested blocks
@@ -161,20 +163,15 @@ class ImportResolver {
    */
   private hasChildren(
     node: ASTNode
-  ): node is ASTNode & { children: ASTNode[] } {
-    return (
-      node.type === "module" ||
-      node.type === "tag_block" ||
-      node.type === "universal_block" ||
-      node.type === "pseudo_block"
-    );
+  ): node is ModuleNode | QueryFilterNode {
+    return node.type === "module" || node.type === "query_filter";
   }
 
   /**
    * Resolve imports within a node that has children.
    */
   private async resolveNode(
-    node: ASTNode & { children: ASTNode[] },
+    node: ModuleNode | QueryFilterNode,
     currentBasePath: string
   ): Promise<ASTNode> {
     const resolvedChildren = await this.resolveChildren(
@@ -190,32 +187,38 @@ class ImportResolver {
   }
 
   /**
-   * Resolve a single import node.
+   * Resolve a single include statement.
    */
-  private async resolveImport(
-    importNode: ImportNode,
+  private async resolveInclude(
+    includeNode: IncludeNode,
     currentBasePath: string
   ): Promise<ASTNode[]> {
-    const importPath = importNode.path;
+    const includePath = includeNode.path;
 
-    // Handle URL imports
-    if (importPath.startsWith("http://") || importPath.startsWith("https://")) {
+    // Handle URL imports (detect even partial URLs corrupted by lexer treating :// as comment)
+    // Common patterns: "https:", "http:", "ftp:", or anything with "://"
+    if (
+      includePath.startsWith("http:") ||
+      includePath.startsWith("https:") ||
+      includePath.startsWith("ftp:") ||
+      includePath.includes("://")
+    ) {
       this.errors.push({
         message: "URL imports not yet supported",
-        location: importNode.source,
+        location: includeNode.source,
         severity: "error",
       });
       return [];
     }
 
     // Resolve the path
-    const resolvedPath = this.resolvePath(importPath, currentBasePath);
+    const resolvedPath = this.resolvePath(includePath, currentBasePath);
 
     // Check for circular imports
     if (this.resolving.has(resolvedPath)) {
       this.errors.push({
         message: `Circular import detected: ${resolvedPath}`,
-        location: importNode.source,
+        location: includeNode.source,
         severity: "error",
       });
       return [];
@@ -227,7 +230,7 @@ class ImportResolver {
       if (existing.isAidFile && existing.ast) {
         return [...existing.ast.children];
       } else if (!existing.isAidFile && existing.content !== undefined) {
-        return [this.makeProseNode(existing.content, importNode.source)];
+        return [this.makeProseNode(existing.content, includeNode.source)];
       }
       return [];
     }
@@ -244,7 +247,7 @@ class ImportResolver {
       } catch (err) {
         this.errors.push({
           message: `Failed to read import: ${resolvedPath}`,
-          location: importNode.source,
+          location: includeNode.source,
           severity: "error",
         });
         this.resolving.delete(resolvedPath);
@@ -285,7 +288,7 @@ class ImportResolver {
 
         // Store the resolved import
         const resolvedImport: ResolvedImport = {
-          originalPath: importPath,
+          originalPath: includePath,
           resolvedPath,
           isAidFile: true,
           ast: resolvedAst,
@@ -297,7 +300,7 @@ class ImportResolver {
       } else {
         // Non-.aid file: inline as prose
         const resolvedImport: ResolvedImport = {
-          originalPath: importPath,
+          originalPath: includePath,
           resolvedPath,
           isAidFile: false,
           content,
@@ -305,13 +308,13 @@ class ImportResolver {
         this.imports.set(resolvedPath, resolvedImport);
 
         this.resolving.delete(resolvedPath);
-        return [this.makeProseNode(content, importNode.source)];
+        return [this.makeProseNode(content, includeNode.source)];
       }
     } catch (err) {
       this.resolving.delete(resolvedPath);
       this.errors.push({
         message: `Error resolving import: ${err}`,
-        location: importNode.source,
+        location: includeNode.source,
         severity: "error",
       });
       return [];
@@ -354,7 +357,6 @@ class ImportResolver {
     return {
       type: "prose",
       content: content.trim(),
-      important: false,
       source,
     };
   }

@@ -1,611 +1,324 @@
+/**
+ * Lexer Tests
+ * 
+ * Tests for the nginx-like syntax lexer.
+ */
+
 import { describe, test, expect } from "bun:test";
 import { tokenize } from "../../src/parser/lexer.js";
 import type { Token, TokenType } from "../../src/types/index.js";
 
-/**
- * Helper to extract just token types and values for easier assertions.
- */
-function getTokenPairs(
-  source: string,
-  filename = "test.aid"
-): Array<[TokenType, string]> {
-  const result = tokenize(source, filename);
-  return result.tokens.map((t) => [t.type, t.value]);
+// Helper to get token types from result
+function getTypes(source: string): TokenType[] {
+  const { tokens } = tokenize(source, "test.aid");
+  return tokens.map(t => t.type);
 }
 
-/**
- * Helper to extract tokens, excluding whitespace and EOF.
- */
-function getSignificantTokens(source: string, filename = "test.aid"): Token[] {
-  const result = tokenize(source, filename);
-  return result.tokens.filter(
-    (t) => t.type !== "whitespace" && t.type !== "eof"
-  );
+// Helper to get token values from result
+function getValues(source: string): string[] {
+  const { tokens } = tokenize(source, "test.aid");
+  return tokens.map(t => t.value);
+}
+
+// Helper to find tokens of a specific type
+function findTokens(source: string, type: TokenType): Token[] {
+  const { tokens } = tokenize(source, "test.aid");
+  return tokens.filter(t => t.type === type);
 }
 
 describe("Lexer", () => {
-  describe("Basic identifiers and braces", () => {
-    test("tokenizes simple identifier", () => {
-      const result = tokenize("server", "test.aid");
-      expect(result.errors).toHaveLength(0);
+  describe("Basic tokens", () => {
+    test("tokenizes identifier", () => {
+      const types = getTypes("server");
+      expect(types).toContain("identifier");
+    });
 
-      const tokens = getSignificantTokens("server");
-      expect(tokens).toHaveLength(1);
+    test("tokenizes identifier with hyphens", () => {
+      const { tokens } = tokenize("email-service", "test.aid");
       expect(tokens[0].type).toBe("identifier");
-      expect(tokens[0].value).toBe("server");
+      expect(tokens[0].value).toBe("email-service");
     });
 
-    test("tokenizes identifier with braces: server { }", () => {
-      const tokens = getSignificantTokens("server { }");
-      expect(tokens).toHaveLength(3);
-      expect(tokens[0]).toMatchObject({ type: "identifier", value: "server" });
-      expect(tokens[1]).toMatchObject({ type: "brace_open", value: "{" });
-      expect(tokens[2]).toMatchObject({ type: "brace_close", value: "}" });
+    test("tokenizes braces", () => {
+      const types = getTypes("{ }");
+      expect(types).toContain("brace_open");
+      expect(types).toContain("brace_close");
     });
 
-    test("tokenizes multiple identifiers", () => {
-      const tokens = getSignificantTokens("server api auth");
-      const identifiers = tokens.filter((t) => t.type === "identifier");
-      expect(identifiers).toHaveLength(3);
-      expect(identifiers.map((t) => t.value)).toEqual([
-        "server",
-        "api",
-        "auth",
-      ]);
+    test("tokenizes semicolon", () => {
+      const types = getTypes(";");
+      expect(types).toContain("semicolon");
     });
 
-    test("tokenizes identifier with underscores", () => {
-      const tokens = getSignificantTokens("my_module_name");
-      expect(tokens[0]).toMatchObject({
-        type: "identifier",
-        value: "my_module_name",
-      });
+    test("tokenizes equals", () => {
+      const types = getTypes("=");
+      expect(types).toContain("equals");
     });
 
-    test("tokenizes identifier with numbers (not at start)", () => {
-      const tokens = getSignificantTokens("auth2 v3_api");
-      const identifiers = tokens.filter((t) => t.type === "identifier");
-      expect(identifiers.map((t) => t.value)).toEqual(["auth2", "v3_api"]);
-    });
-  });
-
-  describe("Tags", () => {
-    test("tokenizes .tag { }", () => {
-      const tokens = getSignificantTokens(".tag { }");
-      expect(tokens[0]).toMatchObject({ type: "dot", value: "." });
-      expect(tokens[1]).toMatchObject({ type: "identifier", value: "tag" });
-      expect(tokens[2]).toMatchObject({ type: "brace_open", value: "{" });
-      expect(tokens[3]).toMatchObject({ type: "brace_close", value: "}" });
+    test("tokenizes include keyword", () => {
+      const types = getTypes("include");
+      expect(types).toContain("include");
     });
 
-    test("tokenizes multiple tags", () => {
-      const tokens = getSignificantTokens(".public.readonly");
-      expect(tokens).toHaveLength(4);
-      expect(tokens[0]).toMatchObject({ type: "dot", value: "." });
-      expect(tokens[1]).toMatchObject({ type: "identifier", value: "public" });
-      expect(tokens[2]).toMatchObject({ type: "dot", value: "." });
-      expect(tokens[3]).toMatchObject({
-        type: "identifier",
-        value: "readonly",
-      });
+    test("tokenizes number", () => {
+      const { tokens } = tokenize("123", "test.aid");
+      expect(tokens[0].type).toBe("number");
+      expect(tokens[0].value).toBe("123");
     });
 
-    test("tokenizes module with tags: server.public { }", () => {
-      const tokens = getSignificantTokens("server.public { }");
-      expect(tokens[0]).toMatchObject({ type: "identifier", value: "server" });
-      expect(tokens[1]).toMatchObject({ type: "dot", value: "." });
-      expect(tokens[2]).toMatchObject({ type: "identifier", value: "public" });
-      expect(tokens[3]).toMatchObject({ type: "brace_open", value: "{" });
-      expect(tokens[4]).toMatchObject({ type: "brace_close", value: "}" });
+    test("tokenizes decimal number", () => {
+      const { tokens } = tokenize("3.14", "test.aid");
+      expect(tokens[0].type).toBe("number");
+      expect(tokens[0].value).toBe("3.14");
     });
   });
 
-  describe("Nested blocks", () => {
-    test("tokenizes nested braces", () => {
-      const source = `server {
-  api {
-  }
-}`;
-      const tokens = getSignificantTokens(source);
-      const braceOpen = tokens.filter((t) => t.type === "brace_open");
-      const braceClose = tokens.filter((t) => t.type === "brace_close");
-      expect(braceOpen).toHaveLength(2);
-      expect(braceClose).toHaveLength(2);
+  describe("Strings", () => {
+    test("tokenizes simple string", () => {
+      const { tokens } = tokenize('"hello"', "test.aid");
+      expect(tokens[0].type).toBe("string");
+      expect(tokens[0].value).toBe('"hello"');
     });
 
-    test("tokenizes deeply nested structure", () => {
-      const source = "a { b { c { } } }";
-      const tokens = getSignificantTokens(source);
-      const identifiers = tokens.filter((t) => t.type === "identifier");
-      expect(identifiers.map((t) => t.value)).toEqual(["a", "b", "c"]);
-    });
-  });
-
-  describe("Operators", () => {
-    test("tokenizes all operator types", () => {
-      const tokens = getSignificantTokens(". : * + ~ >");
-      const types = tokens.map((t) => t.type);
-      expect(types).toContain("dot");
-      expect(types).toContain("colon");
-      expect(types).toContain("star");
-      expect(types).toContain("plus");
-      expect(types).toContain("tilde");
-      expect(types).toContain("gt");
+    test("tokenizes string with escaped quote", () => {
+      const { tokens } = tokenize('"say \\"hi\\""', "test.aid");
+      expect(tokens[0].type).toBe("string");
+      expect(tokens[0].value).toBe('"say \\"hi\\""');
     });
 
-    test("tokenizes child combinator: parent > child", () => {
-      const tokens = getSignificantTokens("parent > child");
-      expect(tokens[0]).toMatchObject({ type: "identifier", value: "parent" });
-      expect(tokens[1]).toMatchObject({ type: "gt", value: ">" });
-      expect(tokens[2]).toMatchObject({ type: "identifier", value: "child" });
+    test("tokenizes multi-line string", () => {
+      const { tokens } = tokenize('"line1\nline2"', "test.aid");
+      expect(tokens[0].type).toBe("string");
     });
 
-    test("tokenizes adjacent sibling combinator: a + b", () => {
-      const tokens = getSignificantTokens("a + b");
-      expect(tokens[1]).toMatchObject({ type: "plus", value: "+" });
-    });
-
-    test("tokenizes general sibling combinator: a ~ b", () => {
-      const tokens = getSignificantTokens("a ~ b");
-      expect(tokens[1]).toMatchObject({ type: "tilde", value: "~" });
-    });
-
-    test("tokenizes universal selector: * { }", () => {
-      const tokens = getSignificantTokens("* { }");
-      expect(tokens[0]).toMatchObject({ type: "star", value: "*" });
-    });
-
-    test("tokenizes pseudo selector: :has()", () => {
-      const tokens = getSignificantTokens(":has(x)");
-      expect(tokens[0]).toMatchObject({ type: "colon", value: ":" });
-      expect(tokens[1]).toMatchObject({ type: "identifier", value: "has" });
-      expect(tokens[2]).toMatchObject({ type: "paren_open", value: "(" });
-      expect(tokens[3]).toMatchObject({ type: "identifier", value: "x" });
-      expect(tokens[4]).toMatchObject({ type: "paren_close", value: ")" });
-    });
-  });
-
-  describe("Imports", () => {
-    test("tokenizes local import: @./file", () => {
-      const tokens = getSignificantTokens("@./file");
-      expect(tokens[0]).toMatchObject({ type: "import", value: "@./file" });
-    });
-
-    test("tokenizes import with extension: @./file.aid", () => {
-      const tokens = getSignificantTokens("@./file.aid");
-      expect(tokens[0]).toMatchObject({ type: "import", value: "@./file.aid" });
-    });
-
-    test("tokenizes URL import: @https://example.com/spec.aid", () => {
-      const tokens = getSignificantTokens("@https://example.com/spec.aid");
-      expect(tokens[0]).toMatchObject({
-        type: "import",
-        value: "@https://example.com/spec.aid",
-      });
-    });
-
-    test("tokenizes parent directory import: @../shared/utils", () => {
-      const tokens = getSignificantTokens("@../shared/utils");
-      expect(tokens[0]).toMatchObject({
-        type: "import",
-        value: "@../shared/utils",
-      });
-    });
-
-    test("import ends at whitespace", () => {
-      const tokens = getSignificantTokens("@./file server");
-      expect(tokens[0]).toMatchObject({ type: "import", value: "@./file" });
-      expect(tokens[1]).toMatchObject({ type: "identifier", value: "server" });
-    });
-
-    test("import ends at brace", () => {
-      const tokens = getSignificantTokens("@./file{");
-      expect(tokens[0]).toMatchObject({ type: "import", value: "@./file" });
-      expect(tokens[1]).toMatchObject({ type: "brace_open", value: "{" });
-    });
-  });
-
-  describe("!important modifier", () => {
-    test("tokenizes !important", () => {
-      const tokens = getSignificantTokens("!important");
-      expect(tokens[0]).toMatchObject({
-        type: "important",
-        value: "!important",
-      });
-    });
-
-    test("tokenizes text followed by !important", () => {
-      const tokens = getSignificantTokens("Must be secure !important");
-      expect(tokens).toContainEqual(
-        expect.objectContaining({ type: "important", value: "!important" })
-      );
-    });
-
-    test("!important in block context", () => {
-      const source = "server {\n  critical rule !important\n}";
-      const tokens = getSignificantTokens(source);
-      expect(tokens).toContainEqual(
-        expect.objectContaining({ type: "important", value: "!important" })
-      );
+    test("reports unclosed string", () => {
+      const { errors } = tokenize('"unclosed', "test.aid");
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].message).toContain("Unclosed string");
     });
   });
 
   describe("Comments", () => {
-    test("tokenizes line comment: // comment", () => {
-      const tokens = getSignificantTokens("// this is a comment");
-      expect(tokens[0]).toMatchObject({
-        type: "comment",
-        value: "// this is a comment",
-      });
-    });
-
-    test("tokenizes block comment: /* comment */", () => {
-      const tokens = getSignificantTokens("/* block comment */");
-      expect(tokens[0]).toMatchObject({
-        type: "comment",
-        value: "/* block comment */",
-      });
-    });
-
-    test("line comment ends at newline", () => {
-      const tokens = getSignificantTokens("// comment\nserver");
-      expect(tokens[0]).toMatchObject({ type: "comment", value: "// comment" });
-      expect(tokens[1]).toMatchObject({ type: "newline", value: "\n" });
-      expect(tokens[2]).toMatchObject({ type: "identifier", value: "server" });
-    });
-
-    test("block comment can span multiple lines", () => {
-      const source = `/* line 1
-line 2
-line 3 */`;
-      const tokens = getSignificantTokens(source);
+    test("tokenizes line comment", () => {
+      const { tokens } = tokenize("// comment", "test.aid");
       expect(tokens[0].type).toBe("comment");
-      expect(tokens[0].value).toContain("line 1");
-      expect(tokens[0].value).toContain("line 2");
-      expect(tokens[0].value).toContain("line 3");
+      expect(tokens[0].value).toBe("// comment");
     });
 
-    test("comment between tokens", () => {
-      const tokens = getSignificantTokens("server /* comment */ { }");
-      expect(tokens[0]).toMatchObject({ type: "identifier", value: "server" });
-      expect(tokens[1]).toMatchObject({ type: "comment" });
-      expect(tokens[2]).toMatchObject({ type: "brace_open" });
+    test("tokenizes block comment", () => {
+      const { tokens } = tokenize("/* block */", "test.aid");
+      expect(tokens[0].type).toBe("comment");
+      expect(tokens[0].value).toBe("/* block */");
+    });
+
+    test("tokenizes multi-line block comment", () => {
+      const { tokens } = tokenize("/* line1\nline2 */", "test.aid");
+      expect(tokens[0].type).toBe("comment");
+    });
+
+    test("reports unclosed block comment", () => {
+      const { errors } = tokenize("/* unclosed", "test.aid");
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].message).toContain("Unclosed block comment");
     });
   });
 
   describe("Code blocks", () => {
-    test("tokenizes inline code: `code`", () => {
-      const tokens = getSignificantTokens("`const x = 1`");
-      expect(tokens[0]).toMatchObject({
-        type: "inline_code",
-        value: "`const x = 1`",
-      });
-    });
-
     test("tokenizes fenced code block", () => {
-      const source = "```\nconst x = 1;\nconst y = 2;\n```";
-      const tokens = getSignificantTokens(source);
-      expect(tokens[0]).toMatchObject({
-        type: "code_block",
-        value: source,
-      });
+      const { tokens } = tokenize("```js\ncode\n```", "test.aid");
+      const codeBlock = tokens.find(t => t.type === "code_block");
+      expect(codeBlock).toBeDefined();
+      expect(codeBlock!.value).toBe("```js\ncode\n```");
     });
 
-    test("fenced code block preserves internal content", () => {
-      const source = "```typescript\nfunction foo() {\n  return `bar`;\n}\n```";
-      const tokens = getSignificantTokens(source);
-      expect(tokens[0].type).toBe("code_block");
-      // The internal backticks should NOT create separate tokens
-      expect(tokens.filter((t) => t.type === "code_block")).toHaveLength(1);
-    });
-
-    test("inline code does not parse contents", () => {
-      const source = "`{ } . : @ server`";
-      const tokens = getSignificantTokens(source);
-      expect(tokens).toHaveLength(1);
+    test("tokenizes inline code", () => {
+      const { tokens } = tokenize("`code`", "test.aid");
       expect(tokens[0].type).toBe("inline_code");
+      expect(tokens[0].value).toBe("`code`");
     });
 
-    test("fenced code block does not parse contents", () => {
-      const source = "```\nserver { api { } }\n@./import\n!important\n```";
-      const tokens = getSignificantTokens(source);
-      expect(tokens).toHaveLength(1);
-      expect(tokens[0].type).toBe("code_block");
-      expect(tokens[0].value).toBe(source);
+    test("reports unclosed fenced code block", () => {
+      const { errors } = tokenize("```\nunclosed", "test.aid");
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].message).toContain("Unclosed fenced code block");
     });
 
-    test("code block with language identifier", () => {
-      const source = "```json\n{\"key\": \"value\"}\n```";
-      const tokens = getSignificantTokens(source);
-      expect(tokens[0].type).toBe("code_block");
-      expect(tokens[0].value).toContain("json");
-    });
-  });
-
-  describe("Prose text", () => {
-    test("words are tokenized as identifiers at lexer level", () => {
-      // At the lexer level, "This is prose" produces identifiers
-      // The parser will determine context (prose vs structural)
-      const tokens = getSignificantTokens("This is prose text");
-      const identifiers = tokens.filter((t) => t.type === "identifier");
-      expect(identifiers.map((t) => t.value)).toEqual([
-        "This",
-        "is",
-        "prose",
-        "text",
-      ]);
-    });
-
-    test("prose token for non-identifier text", () => {
-      // Prose is for text that can't be an identifier start
-      // Once prose starts, it continues until a structural character
-      const tokens = getSignificantTokens("123 abc");
-      // "123" can't start an identifier, so it becomes prose
-      // Space separates it, then "abc" becomes an identifier
-      const proseTokens = tokens.filter((t) => t.type === "prose");
-      const identifiers = tokens.filter((t) => t.type === "identifier");
-      expect(proseTokens.length).toBeGreaterThan(0);
-      expect(proseTokens[0].value).toBe("123");
-      expect(identifiers).toHaveLength(1);
-      expect(identifiers[0].value).toBe("abc");
-    });
-
-    test("prose for special characters not handled otherwise", () => {
-      // Characters like #, $, %, etc. that aren't structural become prose
-      const tokens = getSignificantTokens("#hashtag $var");
-      const proseTokens = tokens.filter((t) => t.type === "prose");
-      expect(proseTokens.some((t) => t.value.includes("#"))).toBe(true);
-      expect(proseTokens.some((t) => t.value.includes("$"))).toBe(true);
-    });
-
-    test("prose stops at structural characters", () => {
-      const tokens = getSignificantTokens("###test { more }");
-      expect(tokens.some((t) => t.type === "prose")).toBe(true);
-      expect(tokens.some((t) => t.type === "brace_open")).toBe(true);
-    });
-
-    test("text inside braces becomes identifiers", () => {
-      // Natural language inside braces will be identifiers at lexer level
-      const source = "server {\n  Handle API requests\n}";
-      const tokens = getSignificantTokens(source);
-      const identifiers = tokens.filter((t) => t.type === "identifier");
-      expect(identifiers.map((t) => t.value)).toContain("Handle");
-      expect(identifiers.map((t) => t.value)).toContain("API");
-      expect(identifiers.map((t) => t.value)).toContain("requests");
+    test("reports unclosed inline code", () => {
+      const { errors } = tokenize("`unclosed", "test.aid");
+      expect(errors.length).toBeGreaterThan(0);
+      expect(errors[0].message).toContain("Unclosed inline code");
     });
   });
 
   describe("Whitespace and newlines", () => {
-    test("tracks newline tokens", () => {
-      const result = tokenize("server\napi", "test.aid");
-      const newlines = result.tokens.filter((t) => t.type === "newline");
-      expect(newlines).toHaveLength(1);
+    test("tokenizes whitespace", () => {
+      const types = getTypes("  \t");
+      expect(types).toContain("whitespace");
     });
 
-    test("tracks whitespace tokens", () => {
-      const result = tokenize("server  api", "test.aid");
-      const whitespace = result.tokens.filter((t) => t.type === "whitespace");
-      expect(whitespace.length).toBeGreaterThan(0);
+    test("tokenizes newlines separately", () => {
+      const { tokens } = tokenize("a\nb", "test.aid");
+      const newlines = tokens.filter(t => t.type === "newline");
+      expect(newlines.length).toBe(1);
     });
 
-    test("includes EOF token", () => {
-      const result = tokenize("server", "test.aid");
-      const eof = result.tokens.find((t) => t.type === "eof");
-      expect(eof).toBeDefined();
+    test("handles CRLF", () => {
+      const { tokens } = tokenize("a\r\nb", "test.aid");
+      // \r becomes whitespace, \n becomes newline
+      const identifiers = tokens.filter(t => t.type === "identifier");
+      expect(identifiers.length).toBe(2);
     });
   });
 
-  describe("Line/column tracking", () => {
-    test("tracks line number correctly", () => {
-      const result = tokenize("line1\nline2\nline3", "test.aid");
-      const identifiers = result.tokens.filter((t) => t.type === "identifier");
+  describe("Text (prose)", () => {
+    test("tokenizes plain text", () => {
+      const { tokens } = tokenize("hello,world!", "test.aid");
+      // Punctuation that's not structural becomes text
+      expect(tokens.some(t => t.type === "text")).toBe(true);
+    });
 
+    test("text stops at structural tokens", () => {
+      const { tokens } = tokenize("prose{", "test.aid");
+      expect(tokens[0].type).toBe("identifier"); // 'prose' is an identifier
+      expect(tokens[1].type).toBe("brace_open");
+    });
+
+    test("tokenizes special characters as text", () => {
+      const { tokens } = tokenize("foo:bar", "test.aid");
+      // 'foo' is identifier, ':bar' is text
+      expect(tokens[0].type).toBe("identifier");
+    });
+  });
+
+  describe("Module block tokenization", () => {
+    test("tokenizes simple module", () => {
+      const types = getTypes("server { }");
+      expect(types).toContain("identifier");
+      expect(types).toContain("brace_open");
+      expect(types).toContain("brace_close");
+    });
+
+    test("tokenizes nested modules", () => {
+      const source = `server {
+        api {
+        }
+      }`;
+      const { tokens } = tokenize(source, "test.aid");
+      const opens = tokens.filter(t => t.type === "brace_open");
+      const closes = tokens.filter(t => t.type === "brace_close");
+      expect(opens.length).toBe(2);
+      expect(closes.length).toBe(2);
+    });
+  });
+
+  describe("Query filter tokenization", () => {
+    test("tokenizes query filter", () => {
+      const source = '"is this a database?" { }';
+      const types = getTypes(source);
+      expect(types).toContain("string");
+      expect(types).toContain("brace_open");
+      expect(types).toContain("brace_close");
+    });
+  });
+
+  describe("Parameter tokenization", () => {
+    test("tokenizes string parameter", () => {
+      const source = 'leaf="single concern";';
+      const types = getTypes(source);
+      expect(types).toContain("identifier");
+      expect(types).toContain("equals");
+      expect(types).toContain("string");
+      expect(types).toContain("semicolon");
+    });
+
+    test("tokenizes number parameter", () => {
+      const source = "priority=1;";
+      const types = getTypes(source);
+      expect(types).toContain("identifier");
+      expect(types).toContain("equals");
+      expect(types).toContain("number");
+      expect(types).toContain("semicolon");
+    });
+  });
+
+  describe("Include tokenization", () => {
+    test("tokenizes include statement", () => {
+      const source = "include ./path;";
+      const { tokens } = tokenize(source, "test.aid");
+      expect(tokens[0].type).toBe("include");
+      expect(tokens[0].value).toBe("include");
+    });
+  });
+
+  describe("Source locations", () => {
+    test("tracks line numbers", () => {
+      const { tokens } = tokenize("a\nb\nc", "test.aid");
+      const identifiers = tokens.filter(t => t.type === "identifier");
       expect(identifiers[0].location.line).toBe(1);
       expect(identifiers[1].location.line).toBe(2);
       expect(identifiers[2].location.line).toBe(3);
     });
 
-    test("tracks column correctly", () => {
-      const result = tokenize("server { }", "test.aid");
-      const tokens = result.tokens.filter((t) => t.type !== "whitespace");
-
-      // "server" starts at column 1
-      expect(tokens[0].location.column).toBe(1);
-      // "{" starts at column 8
-      expect(tokens[1].location.column).toBe(8);
+    test("tracks column numbers", () => {
+      const { tokens } = tokenize("  abc", "test.aid");
+      const identifier = tokens.find(t => t.type === "identifier");
+      expect(identifier!.location.column).toBe(3);
     });
 
-    test("resets column after newline", () => {
-      const result = tokenize("ab\ncd", "test.aid");
-      const identifiers = result.tokens.filter((t) => t.type === "identifier");
-
-      expect(identifiers[0].location).toMatchObject({ line: 1, column: 1 });
-      expect(identifiers[1].location).toMatchObject({ line: 2, column: 1 });
-    });
-
-    test("tracks offset correctly", () => {
-      const result = tokenize("abc def", "test.aid");
-      const identifiers = result.tokens.filter((t) => t.type === "identifier");
-
-      expect(identifiers[0].location.offset).toBe(0); // "abc" at position 0
-      expect(identifiers[1].location.offset).toBe(4); // "def" at position 4
-    });
-
-    test("includes filename in location", () => {
-      const result = tokenize("server", "my/path/file.aid");
-      expect(result.tokens[0].location.file).toBe("my/path/file.aid");
+    test("tracks offset", () => {
+      const { tokens } = tokenize("abc def", "test.aid");
+      const identifiers = tokens.filter(t => t.type === "identifier");
+      expect(identifiers[0].location.offset).toBe(0);
+      expect(identifiers[1].location.offset).toBe(4);
     });
   });
 
-  describe("Error recovery", () => {
-    test("reports error for unclosed block comment", () => {
-      const result = tokenize("/* unclosed comment", "test.aid");
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].message).toContain("Unclosed block comment");
-      // Should still produce a token
-      expect(result.tokens.some((t) => t.type === "comment")).toBe(true);
+  describe("EOF token", () => {
+    test("always ends with EOF", () => {
+      const { tokens } = tokenize("", "test.aid");
+      expect(tokens[tokens.length - 1].type).toBe("eof");
     });
 
-    test("reports error for unclosed fenced code block", () => {
-      const result = tokenize("```\nunclosed code", "test.aid");
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].message).toContain("Unclosed fenced code block");
-      // Should still produce a token
-      expect(result.tokens.some((t) => t.type === "code_block")).toBe(true);
-    });
-
-    test("reports error for unclosed inline code", () => {
-      const result = tokenize("`unclosed", "test.aid");
-      expect(result.errors).toHaveLength(1);
-      expect(result.errors[0].message).toContain("Unclosed inline code");
-      // Should still produce a token
-      expect(result.tokens.some((t) => t.type === "inline_code")).toBe(true);
-    });
-
-    test("continues lexing after error", () => {
-      const result = tokenize("/* unclosed\nserver { }", "test.aid");
-      // Should have an error
-      expect(result.errors.length).toBeGreaterThan(0);
-      // But should still have found some tokens after the error
-      expect(result.tokens.some((t) => t.type === "comment")).toBe(true);
-    });
-
-    test("error location is correct", () => {
-      const result = tokenize("line1\n/* unclosed", "test.aid");
-      expect(result.errors[0].location.line).toBe(2);
-      expect(result.errors[0].location.column).toBe(1);
+    test("EOF after content", () => {
+      const { tokens } = tokenize("hello", "test.aid");
+      expect(tokens[tokens.length - 1].type).toBe("eof");
     });
   });
 
   describe("Complex examples", () => {
-    test("tokenizes full module definition", () => {
-      const source = `server.public {
-  // API server configuration
-  Handle HTTP requests
-  
-  api {
-    REST endpoints
-  }
-}`;
-      const result = tokenize(source, "test.aid");
-      expect(result.errors).toHaveLength(0);
-
-      const tokens = getSignificantTokens(source);
-      expect(tokens.some((t) => t.value === "server")).toBe(true);
-      expect(tokens.some((t) => t.value === "api")).toBe(true);
-      expect(tokens.some((t) => t.type === "comment")).toBe(true);
-    });
-
-    test("tokenizes imports with modules", () => {
-      const source = `@./shared/utils
-@./shared/types
-
+    test("tokenizes full module with parameters", () => {
+      const source = `
 server {
-  Uses shared utilities
-}`;
-      const result = tokenize(source, "test.aid");
-      expect(result.errors).toHaveLength(0);
-
-      const imports = result.tokens.filter((t) => t.type === "import");
-      expect(imports).toHaveLength(2);
-      expect(imports[0].value).toBe("@./shared/utils");
-      expect(imports[1].value).toBe("@./shared/types");
-    });
-
-    test("tokenizes pseudo-selectors with arguments", () => {
-      const source = ":has(api):not(deprecated) { }";
-      const tokens = getSignificantTokens(source);
-
-      const colons = tokens.filter((t) => t.type === "colon");
-      const parens = tokens.filter(
-        (t) => t.type === "paren_open" || t.type === "paren_close"
-      );
-
-      expect(colons).toHaveLength(2);
-      expect(parens).toHaveLength(4);
-    });
-
-    test("tokenizes code block with constraints", () => {
-      const source = `interface {
-  \`\`\`typescript
-  interface User {
-    id: string;
-    name: string;
-  }
-  \`\`\`
+  path="./src";
+  leaf="main entry point";
   
-  !important
+  // API routes
+  api {
+    REST endpoints;
+  }
 }`;
-      const result = tokenize(source, "test.aid");
-      expect(result.errors).toHaveLength(0);
-
-      expect(result.tokens.some((t) => t.type === "code_block")).toBe(true);
-      expect(result.tokens.some((t) => t.type === "important")).toBe(true);
-    });
-  });
-
-  describe("Edge cases", () => {
-    test("empty input", () => {
-      const result = tokenize("", "test.aid");
-      expect(result.errors).toHaveLength(0);
-      expect(result.tokens).toHaveLength(1); // Just EOF
-      expect(result.tokens[0].type).toBe("eof");
+      const { tokens, errors } = tokenize(source, "test.aid");
+      expect(errors).toHaveLength(0);
+      
+      const strings = tokens.filter(t => t.type === "string");
+      const identifiers = tokens.filter(t => t.type === "identifier");
+      
+      expect(strings.length).toBe(2); // path and leaf values
+      expect(identifiers).toContainEqual(expect.objectContaining({ value: "server" }));
+      expect(identifiers).toContainEqual(expect.objectContaining({ value: "api" }));
     });
 
-    test("only whitespace", () => {
-      const result = tokenize("   \t\t  ", "test.aid");
-      expect(result.errors).toHaveLength(0);
-      const nonEof = result.tokens.filter((t) => t.type !== "eof");
-      expect(nonEof.every((t) => t.type === "whitespace")).toBe(true);
-    });
-
-    test("only newlines", () => {
-      const result = tokenize("\n\n\n", "test.aid");
-      expect(result.errors).toHaveLength(0);
-      const newlines = result.tokens.filter((t) => t.type === "newline");
-      expect(newlines).toHaveLength(3);
-    });
-
-    test("consecutive operators", () => {
-      const tokens = getSignificantTokens("..::>>++~~");
-      expect(tokens.filter((t) => t.type === "dot")).toHaveLength(2);
-      expect(tokens.filter((t) => t.type === "colon")).toHaveLength(2);
-      expect(tokens.filter((t) => t.type === "gt")).toHaveLength(2);
-      expect(tokens.filter((t) => t.type === "plus")).toHaveLength(2);
-      expect(tokens.filter((t) => t.type === "tilde")).toHaveLength(2);
-    });
-
-    test("identifier-like tokens separated by operators", () => {
-      const tokens = getSignificantTokens("a.b:c>d+e~f");
-      const identifiers = tokens.filter((t) => t.type === "identifier");
-      expect(identifiers.map((t) => t.value)).toEqual([
-        "a",
-        "b",
-        "c",
-        "d",
-        "e",
-        "f",
-      ]);
-    });
-
-    test("@ alone without path", () => {
-      const tokens = getSignificantTokens("@ {");
-      expect(tokens[0]).toMatchObject({ type: "import", value: "@" });
-      expect(tokens[1]).toMatchObject({ type: "brace_open" });
-    });
-
-    test("! without important", () => {
-      const tokens = getSignificantTokens("!notimportant");
-      // Should be treated as prose, not as !important
-      expect(tokens[0].type).not.toBe("important");
-    });
-
-    test("handles CRLF line endings", () => {
-      const result = tokenize("a\r\nb", "test.aid");
-      const identifiers = result.tokens.filter((t) => t.type === "identifier");
-      expect(identifiers).toHaveLength(2);
-      expect(identifiers[0].location.line).toBe(1);
-      expect(identifiers[1].location.line).toBe(2);
+    test("tokenizes query filter with content", () => {
+      const source = `
+"is this a database module?" {
+  Use transactions;
+  Handle errors;
+}`;
+      const { tokens, errors } = tokenize(source, "test.aid");
+      expect(errors).toHaveLength(0);
+      
+      const strings = tokens.filter(t => t.type === "string");
+      expect(strings[0].value).toContain("is this a database");
     });
   });
 });
