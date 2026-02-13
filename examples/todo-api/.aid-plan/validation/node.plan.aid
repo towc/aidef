@@ -1,0 +1,6 @@
+validation {
+    leaf="true";
+    Validate request bodies
+    Title must be non-empty string
+    Completed must be boolean
+  }

@@ -109,21 +109,21 @@ describe("ensureAidGenDir", () => {
     }
   });
 
-  test("creates .aid-gen directory if it does not exist", () => {
-    const aidGenPath = join(testDir, ".aid-gen");
-    expect(existsSync(aidGenPath)).toBe(false);
+  test("creates .aid-plan directory if it does not exist", () => {
+    const aidPlanPath = join(testDir, ".aid-plan");
+    expect(existsSync(aidPlanPath)).toBe(false);
     
     ensureAidGenDir(testDir);
     
-    expect(existsSync(aidGenPath)).toBe(true);
+    expect(existsSync(aidPlanPath)).toBe(true);
   });
 
-  test("does not error if .aid-gen already exists", () => {
-    const aidGenPath = join(testDir, ".aid-gen");
-    mkdirSync(aidGenPath);
+  test("does not error if .aid-plan already exists", () => {
+    const aidPlanPath = join(testDir, ".aid-plan");
+    mkdirSync(aidPlanPath);
     
     expect(() => ensureAidGenDir(testDir)).not.toThrow();
-    expect(existsSync(aidGenPath)).toBe(true);
+    expect(existsSync(aidPlanPath)).toBe(true);
   });
 });
 

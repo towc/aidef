@@ -34,7 +34,7 @@ export type { CacheMetadata } from "../types/index.js";
  * @param nodePath - The node path (e.g., "server/api")
  * @param currentSpec - The current spec content
  * @param parentContext - The current parent context
- * @param outputDir - The .aid-gen/ directory
+ * @param outputDir - The .aid-plan/ directory
  * @returns DiffResult indicating whether recompilation is needed
  */
 export async function diffNode(

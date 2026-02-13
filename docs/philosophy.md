@@ -246,7 +246,7 @@ This keeps the pipeline flowing and lets you batch-review decisions.
 | Extension | Purpose |
 |-----------|---------|
 | `.aid` | User source files (committed to git) |
-| `.plan.aid` | Generated specs in `.aid-gen/` (gitignored) |
+| `.plan.aid` | Generated specs in `.aid-plan/` (gitignored) |
 | `.plan.aid.map` | Source maps for traceability |
 | `.plan.aid.questions.json` | Questions for human review |
 | `.aids` | Optimization suggestions (future) |

@@ -1,0 +1,6 @@
+storage {
+  leaf="true";
+  In-memory storage (Map)
+  No persistence required
+  Thread-safe operations
+}

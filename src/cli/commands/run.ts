@@ -1,6 +1,6 @@
 /**
  * Default compile command
- * Compiles root.aid into .aid-gen/ tree with recursive compilation and parallelization.
+ * Compiles root.aid into .aid-plan/ tree with recursive compilation and parallelization.
  */
 
 import { dirname, join } from "node:path";
@@ -19,6 +19,13 @@ interface CompilationState {
   currentNodes: Set<string>;
   errors: string[];
   questions: number;
+  aiCalls: number;
+  /** Maximum nodes allowed (failsafe) */
+  maxNodes: number;
+  /** Maximum AI calls allowed (failsafe) */
+  maxCalls: number;
+  /** Whether we hit a limit */
+  limitReached: 'nodes' | 'calls' | null;
 }
 
 /**
@@ -55,18 +62,23 @@ export async function runCommand(options: CLIOptions): Promise<number> {
   
   console.log("  Parse complete.\n");
 
-  // Get the provider
-  const providerName = process.env.AID_PROVIDER || process.env.AIDEF_PROVIDER || 'anthropic';
-  
-  if (!isValidProvider(providerName)) {
-    console.error(`Error: Unknown provider '${providerName}'`);
-    console.error(`Supported providers: ${getSupportedProviders().join(', ')}`);
-    return 1;
-  }
+  // Get the provider - check for explicit provider name or use default
+  const providerName = process.env.AID_PROVIDER || process.env.AIDEF_PROVIDER;
   
   let provider: Provider;
   try {
-    provider = getProvider(providerName);
+    if (providerName) {
+      if (!isValidProvider(providerName)) {
+        console.error(`Error: Unknown provider '${providerName}'`);
+        console.error(`Supported providers: ${getSupportedProviders().join(', ')}`);
+        return 1;
+      }
+      provider = getProvider(providerName);
+    } else {
+      // Use default provider based on available API keys
+      const { getDefaultProvider } = await import("../../providers/index.js");
+      provider = getDefaultProvider();
+    }
     console.log(`Using provider: ${provider.name}`);
   } catch (err) {
     console.error(`Error initializing provider: ${err}`);
@@ -85,25 +97,30 @@ export async function runCommand(options: CLIOptions): Promise<number> {
     console.log("  Connection OK.\n");
   } catch (err) {
     console.error(`Provider connection failed: ${err}`);
-    console.error("Check your API key (ANTHROPIC_API_KEY or OPENAI_API_KEY).");
+    console.error("Check your API key (ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY).");
     return 1;
   }
 
   // Set up call logger
-  const outputDir = join(dirname(options.rootPath), ".aid-gen");
+  const outputDir = join(dirname(options.rootPath), ".aid-plan");
   const callLogger = new CallLogger(outputDir);
   setCallLogger(callLogger);
 
-  // Initialize compilation state
+  // Initialize compilation state with limits
   const state: CompilationState = {
     totalNodes: 1, // Start with root
     completedNodes: 0,
     currentNodes: new Set(["root"]),
     errors: [],
     questions: 0,
+    aiCalls: 0,
+    maxNodes: options.maxNodes,
+    maxCalls: options.maxCalls,
+    limitReached: null,
   };
 
-  console.log("Starting compilation...\n");
+  console.log("Starting compilation...");
+  console.log(`  Limits: max ${state.maxNodes} nodes, max ${state.maxCalls} AI calls\n`);
 
   // Compile recursively with parallelization
   // Root receives empty context (no parent)
@@ -123,8 +140,16 @@ export async function runCommand(options: CLIOptions): Promise<number> {
   // Summary
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
   console.log("\n=================");
-  console.log("Compilation complete!");
-  console.log(`  Nodes compiled: ${state.completedNodes}`);
+  
+  if (state.limitReached) {
+    console.log(`⚠️  Compilation STOPPED - ${state.limitReached} limit reached!`);
+    console.log(`  Use --max-${state.limitReached}=N to increase the limit.`);
+  } else {
+    console.log("Compilation complete!");
+  }
+  
+  console.log(`  Nodes compiled: ${state.completedNodes}/${state.maxNodes}`);
+  console.log(`  AI calls: ${state.aiCalls}/${state.maxCalls}`);
   console.log(`  Time: ${elapsed}s`);
   
   if (state.questions > 0) {
@@ -138,11 +163,33 @@ export async function runCommand(options: CLIOptions): Promise<number> {
         console.error(`    - ${error}`);
       }
     }
-    return 1;
   }
 
   console.log(`\nOutput: ${outputDir}/`);
-  return 0;
+  
+  // Return error if limit was reached
+  if (state.limitReached) {
+    return 1;
+  }
+  
+  return state.errors.length > 0 ? 1 : 0;
+}
+
+/**
+ * Check if we've hit any limits.
+ */
+function checkLimits(state: CompilationState): boolean {
+  if (state.limitReached) return true;
+  
+  if (state.completedNodes >= state.maxNodes) {
+    state.limitReached = 'nodes';
+    return true;
+  }
+  if (state.aiCalls >= state.maxCalls) {
+    state.limitReached = 'calls';
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -155,7 +202,11 @@ async function compileRecursively(
   state: CompilationState,
   verbose: boolean
 ): Promise<void> {
+  // Check limits before starting
+  if (checkLimits(state)) return;
+
   // Compile the root node (uses createRootContext internally)
+  state.aiCalls++;
   const result = await compileRootNode(node, provider, outputDir);
   
   state.completedNodes++;
@@ -170,6 +221,9 @@ async function compileRecursively(
     // Simple progress indicator
     process.stdout.write(`\r  Compiling... ${state.completedNodes}/${state.totalNodes} nodes`);
   }
+
+  // Check limits after each node
+  if (checkLimits(state)) return;
 
   // If there are children, compile them in parallel
   // Each child already has its context set in ChildSpec.context
@@ -201,6 +255,33 @@ async function compileChildNode(
   state: CompilationState,
   verbose: boolean
 ): Promise<void> {
+  // Check limits before processing
+  if (checkLimits(state)) return;
+
+  // If child is already marked as a leaf by the AI, don't compile it further
+  if (childSpec.isLeaf) {
+    // Write the leaf plan file and context
+    const { writePlanFile, writeContextFile } = await import("../../compiler/writer.js");
+    
+    try {
+      await writePlanFile(outputDir, childSpec.name, childSpec.spec);
+      await writeContextFile(outputDir, childSpec.name, childSpec.context);
+    } catch (err) {
+      state.errors.push(`Failed to write leaf node ${childSpec.name}: ${err}`);
+    }
+    
+    state.completedNodes++;
+    state.currentNodes.delete(childSpec.name);
+    
+    if (verbose) {
+      console.log(`  [${state.completedNodes}/${state.totalNodes}] ${childSpec.name} (leaf - marked by parent)`);
+    } else {
+      process.stdout.write(`\r  Compiling... ${state.completedNodes}/${state.totalNodes} nodes`);
+    }
+    
+    return;
+  }
+
   // Build a synthetic AST node from the child spec
   const childNode: RootNode = {
     type: "root",
@@ -220,7 +301,11 @@ async function compileChildNode(
     },
   };
 
+  // Check limits before AI call
+  if (checkLimits(state)) return;
+
   // Use the context from ChildSpec (parent already decided what this child receives)
+  state.aiCalls++;
   const result = await compileNode(childNode, childSpec.context, provider, outputDir);
   
   state.completedNodes++;
@@ -234,6 +319,9 @@ async function compileChildNode(
   } else {
     process.stdout.write(`\r  Compiling... ${state.completedNodes}/${state.totalNodes} nodes`);
   }
+
+  // Check limits after compilation
+  if (checkLimits(state)) return;
 
   // Recursively compile grandchildren
   // Each grandchild's context is in result.children[].context

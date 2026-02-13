@@ -1,0 +1,12 @@
+todo-item {
+  leaf="true";
+  interface
+  Todo {
+    id: string
+    title: string
+    completed: boolean
+    createdAt: string
+  }
+  Use UUID for id generation
+  Timestamps in ISO 8601 format
+}

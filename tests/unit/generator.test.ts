@@ -31,7 +31,7 @@ import type {
 import { EMPTY_CONTEXT } from "../../src/types";
 
 // Test directories in /tmp
-const TEST_AID_GEN = "/tmp/aidef-generator-tests/.aid-gen";
+const TEST_AID_GEN = "/tmp/aidef-generator-tests/.aid-plan";
 const TEST_BUILD = "/tmp/aidef-generator-tests/build";
 
 // =============================================================================

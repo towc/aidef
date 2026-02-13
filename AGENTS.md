@@ -38,7 +38,7 @@ aidef/
 ├── docs/             # Project documentation
 ├── examples/         # Sample .aid files
 ├── root.aid          # AIDef's own spec (meta)
-├── .aid-gen/         # Generated compilation output (gitignored)
+├── .aid-plan/         # Generated compilation output (gitignored)
 └── build/            # Generated code (gitignored)
 ```
 
@@ -59,7 +59,7 @@ AIDef uses compiler terminology. See `docs/philosophy.md` for full details.
 ## Key Concepts
 
 ### Two-Phase Architecture
-1. **Compilation**: Parse `.aid` (source) → generate execution plan (`.plan.aid` tree) in `.aid-gen/`
+1. **Compilation**: Parse `.aid` (source) → generate execution plan (`.plan.aid` tree) in `.aid-plan/`
 2. **Build**: Execute plan via runtime → generate code to `./build/`
 
 ### File Types
@@ -71,7 +71,7 @@ AIDef uses compiler terminology. See `docs/philosophy.md` for full details.
 | `.plan.aid.questions.json` | JSON | Questions for human review |
 
 ### Agent Isolation
-- Agents CANNOT read: sibling `.plan.aid`, `.aid-gen/` folder, `build/` folder
+- Agents CANNOT read: sibling `.plan.aid`, `.aid-plan/` folder, `build/` folder
 - Context passed in-memory from parent to child (not via files)
 - Enables true parallelization
 

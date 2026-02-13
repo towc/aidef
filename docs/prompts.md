@@ -146,7 +146,7 @@ The provider should:
 5. testConnection() should make a minimal API call
 
 Also create:
-- `src/providers/call-logger.ts` - Logs all calls to .aid-gen/calls.jsonl
+- `src/providers/call-logger.ts` - Logs all calls to .aid-plan/calls.jsonl
 
 Use temperature: 0 for consistency.
 
@@ -181,7 +181,7 @@ Create:
 The CLI should:
 1. Use Bun.argv for argument parsing (no external deps)
 2. Find root.aid in current directory (or error)
-3. Create .aid-gen/ if it doesn't exist
+3. Create .aid-plan/ if it doesn't exist
 4. Support flags: --browse, --build, --auth, --estimate, --verbose, --help
 5. Print progress to stdout
 6. Return appropriate exit codes
@@ -215,7 +215,7 @@ Your task: Implement single-node compilation in `src/compiler/`
 Create:
 1. `src/compiler/compile-node.ts` - Compile a single node
 2. `src/compiler/context-builder.ts` - Build context for children (in-memory)
-3. `src/compiler/writer.ts` - Write .plan.aid, .plan.aid.questions.json files to .aid-gen/
+3. `src/compiler/writer.ts` - Write .plan.aid, .plan.aid.questions.json files to .aid-plan/
 
 The compiler should:
 1. Take a resolved AST node + parent context

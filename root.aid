@@ -66,7 +66,7 @@ parser {
 compiler {
   // Phase 1: generate .plan.aid tree from root.aid
   
-  reads .aid files, outputs .aid-gen/ folder;
+  reads .aid files, outputs .aid-plan/ folder;
   context passed in-memory from parent to child;
   
   compile-node {
@@ -94,7 +94,7 @@ compiler {
   writer {
     leaf=true;
     write .plan.aid, .plan.aid.questions.json files;
-    create directory structure in .aid-gen/;
+    create directory structure in .aid-plan/;
   }
 }
 

@@ -440,6 +440,61 @@ export interface CLIOptions {
   rootPath: string;
   verbose: boolean;
   maxCost?: number;
+  /** Maximum number of nodes to compile (default: 100) */
+  maxNodes: number;
+  /** Maximum number of AI calls to make (default: 100) */
+  maxCalls: number;
+  /** Maximum parallel compilations (default: 10) */
+  maxParallel: number;
+  /** Continue from previous state instead of restarting */
+  continueFromState: boolean;
+}
+
+/**
+ * Compilation state persisted to .aid-plan/state.json
+ */
+export interface CompilationStateFile {
+  /** Version for future compatibility */
+  version: 1;
+  /** Timestamp when compilation started */
+  startedAt: string;
+  /** Timestamp of last update */
+  updatedAt: string;
+  /** Whether compilation completed successfully */
+  completed: boolean;
+  /** Nodes pending compilation (path -> ChildSpec JSON) */
+  pendingNodes: Array<{
+    path: string;
+    spec: string;
+    context: ChildContext;
+    isLeaf: boolean;
+  }>;
+  /** Nodes that have been compiled */
+  completedNodes: string[];
+  /** Statistics */
+  stats: CompilationStats;
+}
+
+/**
+ * Statistics tracked during compilation
+ */
+export interface CompilationStats {
+  /** Total nodes compiled */
+  nodesCompiled: number;
+  /** Total AI calls made */
+  aiCalls: number;
+  /** Times we hit the parallel limit and had to wait */
+  parallelLimitHits: number;
+  /** Times we hit the nodes limit */
+  nodesLimitHits: number;
+  /** Times we hit the calls limit */
+  callsLimitHits: number;
+  /** Total time spent waiting for parallel slots (ms) */
+  parallelWaitTimeMs: number;
+  /** Questions raised */
+  questionsRaised: number;
+  /** Errors encountered */
+  errors: string[];
 }
 
 export interface CompilationProgress {

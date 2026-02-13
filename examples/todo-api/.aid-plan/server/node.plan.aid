@@ -1,0 +1,7 @@
+server {
+  leaf="true";
+  Entry point: src/index.ts
+  Port: 3000 (configurable via PORT env)
+  Log requests to console
+  Graceful shutdown on SIGINT
+}

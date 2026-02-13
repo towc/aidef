@@ -1,7 +1,7 @@
 /**
  * Call Logger
  * 
- * Logs all AI provider calls to .aid-gen/calls.jsonl for debugging,
+ * Logs all AI provider calls to .aid-plan/calls.jsonl for debugging,
  * cost tracking, and reproducibility.
  */
 
@@ -19,10 +19,10 @@ export class CallLogger {
   
   /**
    * Create a new CallLogger.
-   * @param aidGenDir - Path to the .aid-gen directory (defaults to .aid-gen)
+   * @param aidPlanDir - Path to the .aid-plan directory (defaults to .aid-plan)
    */
-  constructor(aidGenDir: string = '.aid-gen') {
-    this.logPath = join(aidGenDir, 'calls.jsonl');
+  constructor(aidPlanDir: string = '.aid-plan') {
+    this.logPath = join(aidPlanDir, 'calls.jsonl');
   }
   
   /**

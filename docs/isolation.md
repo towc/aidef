@@ -27,7 +27,7 @@ AIDef's core architectural principle: **each compilation agent is sandboxed**. T
 | Other `.aid` files | Would break isolation |
 | Sibling context | Siblings are parallel, no cross-talk |
 | Grandparent details | Parent encapsulates what child needs |
-| `.aid-gen/` folder | Build artifacts shouldn't influence builds |
+| `.aid-plan/` folder | Build artifacts shouldn't influence builds |
 | `build/` folder | Generated code shouldn't influence generation |
 
 ## The Encapsulation Model
@@ -127,7 +127,7 @@ The parent decides:
 ## File Structure
 
 ```
-.aid-gen/
+.aid-plan/
 ├── root.plan.aid           # The compiled spec
 ├── root.plan.aid.map       # Source map (where each line came from)
 ├── root.plan.aid.questions.json           # Questions for human review
@@ -139,7 +139,7 @@ The parent decides:
 │       └── node.plan.aid.map
 ```
 
-**No `.aidc` files** - context is passed in-memory during compilation, not stored in files.
+Context is passed in-memory during compilation via tool calls, not stored in files.
 
 **Source maps** (`.plan.aid.map`) track traceability without polluting the readable `.plan.aid` files.
 

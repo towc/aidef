@@ -63,31 +63,43 @@ const mockGenerateRequest: GenerateRequest = {
   nodePath: "server/utils/logger",
 };
 
-const mockCompileResponseJson = JSON.stringify({
-  children: [
-    { name: "router", isLeaf: false, spec: "Handles routing logic" },
-    { name: "middleware", isLeaf: true, spec: "Request middleware" },
-  ],
-  questions: [
-    {
-      id: "q1",
-      question: "What HTTP framework should be used?",
-      context: "The spec doesn't specify a framework",
-      assumption: "Using native HTTP module",
-      impact: "Affects implementation approach",
-    },
-  ],
-  considerations: [
-    { id: "c1", note: "Consider adding rate limiting", blocking: false },
-  ],
-  interfaces: [
-    { name: "RequestHandler", definition: "type RequestHandler = (req, res) => void", source: "server" },
-  ],
-  constraints: [
-    { rule: "Must handle errors gracefully", source: "server" },
-  ],
-  utilities: [],
-});
+// New .plan.aid format response
+const mockCompileResponsePlanAid = `
+interfaces {
+  \`\`\`typescript
+  interface RequestHandler {
+    handle(req: Request): Response;
+  }
+  \`\`\`
+}
+
+router {
+  Handles routing logic;
+  
+  @implements: none
+  @receives: RequestHandler
+  @constraints: Must handle errors gracefully
+}
+
+middleware {
+  leaf=true;
+  
+  Request middleware;
+  
+  @implements: none
+  @receives: none
+  @constraints: Must handle errors gracefully
+}
+
+questions {
+  q1: "What HTTP framework should be used?" {
+    context: "The spec doesn't specify a framework";
+    options: "Native HTTP, Express, Fastify";
+    assumption: "Using native HTTP module";
+    impact: "Affects implementation approach";
+  }
+}
+`;
 
 const mockGenerateResponseJson = JSON.stringify({
   files: [
@@ -105,8 +117,8 @@ const mockGenerateResponseJson = JSON.stringify({
 // =============================================================================
 
 describe("parseCompileResponse", () => {
-  test("parses valid JSON response", () => {
-    const result = parseCompileResponse(mockCompileResponseJson);
+  test("parses valid .plan.aid response", () => {
+    const result = parseCompileResponse(mockCompileResponsePlanAid);
     
     expect(result.children).toHaveLength(2);
     expect(result.children[0].name).toBe("router");
@@ -117,36 +129,66 @@ describe("parseCompileResponse", () => {
     expect(result.questions).toHaveLength(1);
     expect(result.questions[0].question).toContain("HTTP framework");
     
-    expect(result.considerations).toHaveLength(1);
     expect(result.interfaces).toHaveLength(1);
-    expect(result.constraints).toHaveLength(1);
+    expect(result.interfaces[0].name).toBe("RequestHandler");
   });
 
-  test("parses JSON wrapped in markdown code block", () => {
-    const wrapped = "```json\n" + mockCompileResponseJson + "\n```";
+  test("parses .plan.aid wrapped in markdown code block", () => {
+    const wrapped = "```\n" + mockCompileResponsePlanAid + "\n```";
     const result = parseCompileResponse(wrapped);
     
     expect(result.children).toHaveLength(2);
   });
 
-  test("extracts JSON from mixed content", () => {
-    const mixed = "Here is the analysis:\n" + mockCompileResponseJson + "\n\nThat's all!";
-    const result = parseCompileResponse(mixed);
-    
-    expect(result.children).toHaveLength(2);
-  });
-
-  test("handles missing optional fields", () => {
-    const minimal = JSON.stringify({ children: [] });
-    const result = parseCompileResponse(minimal);
+  test("handles empty response gracefully", () => {
+    const empty = "";
+    const result = parseCompileResponse(empty);
     
     expect(result.children).toHaveLength(0);
     expect(result.questions).toHaveLength(0);
     expect(result.interfaces).toHaveLength(0);
   });
 
-  test("throws on invalid JSON", () => {
-    expect(() => parseCompileResponse("not json at all")).toThrow();
+  test("handles minimal module definition", () => {
+    const minimal = `
+simple {
+  leaf=true;
+  Just a simple module;
+}
+`;
+    const result = parseCompileResponse(minimal);
+    
+    expect(result.children).toHaveLength(1);
+    expect(result.children[0].name).toBe("simple");
+    expect(result.children[0].isLeaf).toBe(true);
+  });
+
+  test("extracts interfaces from interfaces block", () => {
+    const withInterfaces = `
+interfaces {
+  \`\`\`typescript
+  interface Logger {
+    log(msg: string): void;
+  }
+  \`\`\`
+}
+
+handler {
+  leaf=true;
+  Handles requests;
+  Uses the Logger interface;
+}
+`;
+    const result = parseCompileResponse(withInterfaces);
+    
+    // Interfaces are extracted at the top level
+    expect(result.interfaces).toHaveLength(1);
+    expect(result.interfaces[0].name).toBe("Logger");
+    
+    // Children have empty context - context is passed in-memory by parent, not parsed
+    expect(result.children).toHaveLength(1);
+    expect(result.children[0].name).toBe("handler");
+    expect(result.children[0].isLeaf).toBe(true);
   });
 });
 
@@ -330,7 +372,8 @@ describe("getSupportedProviders", () => {
     const providers = getSupportedProviders();
     expect(providers).toContain("anthropic");
     expect(providers).toContain("openai");
-    expect(providers).toHaveLength(2);
+    expect(providers).toContain("google");
+    expect(providers).toHaveLength(3);
   });
 });
 

@@ -1,37 +1,38 @@
 /**
  * Build phase command
- * Generates code from leaf nodes in .aid-gen/
+ * Generates code from leaf nodes in .aid-plan/
  */
 
 import { dirname, join } from "node:path";
 import type { CLIOptions } from "../../types";
-import { getProvider } from "../../providers";
+import { getDefaultProvider } from "../../providers";
 import { runBuild } from "../../generator";
 
 export async function buildCommand(options: CLIOptions): Promise<number> {
   const projectDir = dirname(options.rootPath);
-  const aidGenDir = join(projectDir, ".aid-gen");
+  const aidPlanDir = join(projectDir, ".aid-plan");
   const buildDir = join(projectDir, "build");
 
   console.log("Starting build phase...");
 
   if (options.verbose) {
-    console.log(`Source: ${aidGenDir}`);
+    console.log(`Source: ${aidPlanDir}`);
     console.log(`Output: ${buildDir}`);
   }
 
-  // Get the provider (default to anthropic)
+  // Get the default provider based on available API keys
   let provider;
   try {
-    provider = getProvider("anthropic");
+    provider = getDefaultProvider();
+    console.log(`Using provider: ${provider.name}`);
   } catch (err) {
     console.error("Failed to initialize provider:", err);
-    console.error("Set ANTHROPIC_API_KEY environment variable or run 'aid --auth'");
+    console.error("Set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY");
     return 1;
   }
 
   // Run the build
-  const result = await runBuild(provider, aidGenDir, buildDir, {
+  const result = await runBuild(provider, aidPlanDir, buildDir, {
     verbose: options.verbose,
     addSourceHeaders: true,
     clean: false, // Don't clean by default

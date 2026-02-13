@@ -44,13 +44,13 @@ The MVP foundation is complete. All core components work with nginx-like syntax.
 - [x] OpenAI adapter via Vercel AI SDK
 - [x] Config loading: env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
 - [x] Connection testing
-- [x] Call logging to `.aid-gen/calls.jsonl`
+- [x] Call logging to `.aid-plan/calls.jsonl`
 
 #### Phase 4: Single-Node Compilation ✅
 - [x] Compile one node with provider
 - [x] Generate `.plan.aid` output
 - [x] Generate `.plan.aid.questions.json` output (YAML) for questions
-- [x] Write to `.aid-gen/`
+- [x] Write to `.aid-plan/`
 
 #### Phase 5: Recursive Compilation ✅
 - [x] Walk tree, compile each node
@@ -64,13 +64,10 @@ The MVP foundation is complete. All core components work with nginx-like syntax.
 - [x] Cache metadata in context
 
 #### Phase 6: Context Model Refactor ✅
-- [x] Remove `.aidc` concept (context passed in-memory)
-- [x] Add `ChildContext` to `ChildSpec`
-- [x] Add source maps (`.plan.aid.map`)
-- [x] Remove `writeAidcFile` / `readAidcFile`
-- [x] Pass context in-memory from parent to child
-- [x] Store cache metadata in source maps
-- [x] Update tests for new model
+- [x] `ChildContext` in `ChildSpec`
+- [x] Source maps (`.plan.aid.map`)
+- [x] Context passed in-memory via tool calls
+- [x] Cache metadata in source maps
 
 ---
 
@@ -89,7 +86,7 @@ The MVP foundation is complete. All core components work with nginx-like syntax.
 ## Current Phase: TUI
 
 ### Phase 9: TUI (`--browse`) - Current
-- [ ] Tree view of `.aid-gen/` structure
+- [ ] Tree view of `.aid-plan/` structure
 - [ ] View node content
 - [ ] View/answer `.plan.aid.questions.json` questions
 - [ ] View `.aids` suggestions for each module

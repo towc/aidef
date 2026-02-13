@@ -51,17 +51,17 @@ export interface BuildOptions {
 /**
  * Run the build phase.
  *
- * Discovers all leaf nodes in .aid-gen/ and executes them in parallel
+ * Discovers all leaf nodes in .aid-plan/ and executes them in parallel
  * to generate code in build/.
  *
  * @param provider - The AI provider to use
- * @param aidGenDir - The .aid-gen/ directory
+ * @param aidPlanDir - The .aid-plan/ directory
  * @param buildDir - The build/ output directory
  * @param options - Build options
  */
 export async function runBuild(
   provider: Provider,
-  aidGenDir: string,
+  aidPlanDir: string,
   buildDir: string,
   options: BuildOptions = {}
 ): Promise<BuildResult> {
@@ -88,7 +88,7 @@ export async function runBuild(
     console.log("Discovering leaf nodes...");
   }
 
-  const leaves = await discoverLeafNodes(aidGenDir);
+  const leaves = await discoverLeafNodes(aidPlanDir);
 
   if (leaves.length === 0) {
     console.log("No leaf nodes found. Run compilation first.");
@@ -99,7 +99,7 @@ export async function runBuild(
       files: [],
       questions: [],
       considerations: [],
-      errors: ["No leaf nodes found in .aid-gen/"],
+      errors: ["No leaf nodes found in .aid-plan/"],
       results: [],
     };
   }
@@ -126,7 +126,7 @@ export async function runBuild(
 
     const batchResults = await Promise.all(
       batch.map((leaf) =>
-        executeGenerator(leaf.nodePath, provider, aidGenDir, buildDir, executeOptions)
+        executeGenerator(leaf.nodePath, provider, aidPlanDir, buildDir, executeOptions)
       )
     );
 

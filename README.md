@@ -80,11 +80,11 @@ Run:
 aid .
 ```
 
-AIDef compiles to `.aid-gen/` with `.plan.aid` files. Inspect, approve, then build.
+AIDef compiles to `.aid-plan/` with `.plan.aid` files. Inspect, approve, then build.
 
 ## How It Works
 
-1. **Compilation**: Parse `root.aid` → generate `.plan.aid` tree in `.aid-gen/`
+1. **Compilation**: Parse `root.aid` → generate `.plan.aid` tree in `.aid-plan/`
 2. **Review**: Inspect the tree, answer questions in `.plan.aid.questions.json` files
 3. **Build**: Execute leaf nodes → generate code to `build/`
 

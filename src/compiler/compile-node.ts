@@ -69,7 +69,7 @@ export interface CompileOptions {
  * @param node - The AST node to compile
  * @param context - Context passed from parent (what this node can use)
  * @param provider - The AI provider to use for compilation
- * @param outputDir - The .aid-gen/ directory
+ * @param outputDir - The .aid-plan/ directory
  * @param options - Compilation options (caching, verbosity)
  * @returns CompileNodeResult with children and status
  */
@@ -199,7 +199,7 @@ export async function compileNode(
  *
  * @param rootNode - The root AST node
  * @param provider - The AI provider
- * @param outputDir - The .aid-gen/ directory
+ * @param outputDir - The .aid-plan/ directory
  * @param options - Compilation options
  * @returns CompileNodeResult
  */

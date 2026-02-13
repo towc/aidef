@@ -1,0 +1,19 @@
+api {
+  Base path: /api/todos
+  endpoints {
+    leaf="true";
+    GET /api/todos - list all todos
+    GET /api/todos/:id - get single todo
+    POST /api/todos - create todo (title required)
+    PATCH /api/todos/:id - update todo (title, completed)
+    DELETE /api/todos/:id - delete todo
+    Return 404 for missing todos
+    Return 400 for invalid input
+  }
+  validation {
+    leaf="true";
+    Validate request bodies
+    Title must be non-empty string
+    Completed must be boolean
+  }
+}

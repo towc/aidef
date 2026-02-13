@@ -47,19 +47,19 @@ export interface ExecuteOptions {
 /**
  * Execute a single generator node.
  *
- * Reads the node's spec and context from .aid-gen/, calls the provider
+ * Reads the node's spec and context from .aid-plan/, calls the provider
  * to generate code, and writes files to build/.
  *
  * @param nodePath - The node path (e.g., "server/api/users")
  * @param provider - The AI provider to use
- * @param aidGenDir - The .aid-gen/ directory
+ * @param aidPlanDir - The .aid-plan/ directory
  * @param buildDir - The build/ output directory
  * @param options - Execution options
  */
 export async function executeGenerator(
   nodePath: string,
   provider: Provider,
-  aidGenDir: string,
+  aidPlanDir: string,
   buildDir: string,
   options: ExecuteOptions = {}
 ): Promise<ExecuteResult> {
@@ -67,7 +67,7 @@ export async function executeGenerator(
   const errors: string[] = [];
 
   // Read the spec
-  const spec = await readPlanFile(aidGenDir, nodePath);
+  const spec = await readPlanFile(aidPlanDir, nodePath);
   if (!spec) {
     return {
       nodePath,
@@ -80,7 +80,7 @@ export async function executeGenerator(
   }
 
   // Read the context (should exist for leaf nodes)
-  const context = await readContextFile(aidGenDir, nodePath) ?? EMPTY_CONTEXT;
+  const context = await readContextFile(aidPlanDir, nodePath) ?? EMPTY_CONTEXT;
 
   if (verbose) {
     console.log(`  [generate] ${nodePath}`);
@@ -133,7 +133,7 @@ export async function executeGenerator(
   // Write questions file if there are questions or considerations
   if (result.questions.length > 0 || result.considerations.length > 0) {
     try {
-      await writeQuestionsFile(aidGenDir, nodePath, {
+      await writeQuestionsFile(aidPlanDir, nodePath, {
         module: nodePath,
         questions: result.questions,
         considerations: result.considerations,

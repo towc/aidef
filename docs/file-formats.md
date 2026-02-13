@@ -13,7 +13,7 @@ AIDef uses three file types plus a call log:
 
 **Note:** Context (constraints, suggestions, interfaces, utilities) is passed in-memory from parent to child during compilation. There are no separate context files.
 
-User `.aid` files are committed to version control. Generated files in `.aid-gen/` are gitignored.
+User `.aid` files are committed to version control. Generated files in `.aid-plan/` are gitignored.
 
 ## The `.aid` File Format
 
@@ -367,7 +367,7 @@ project/
 ├── src/                        # Organize .aid files like code
 │   ├── api.aid
 │   └── models.aid
-├── .aid-gen/                   # Generated output (gitignored)
+├── .aid-plan/                   # Generated output (gitignored)
 │   ├── root.plan.aid                        # Compiled root
 │   ├── server/
 │   │   ├── node.plan.aid                    # Compiled node

@@ -2,7 +2,7 @@
  * File Writer
  *
  * Writes .plan.aid, .plan.aid.questions.json, and .plan.aid.context.json files 
- * to the .aid-gen/ directory.
+ * to the .aid-plan/ directory.
  * Uses Bun.file() and Bun.write() for file operations.
  */
 
@@ -111,8 +111,8 @@ export async function readContextFile(
  * Get the path for a .plan.aid file.
  *
  * File structure:
- * - root node: .aid-gen/root.plan.aid
- * - nested nodes: .aid-gen/server/node.plan.aid, .aid-gen/server/api/node.plan.aid
+ * - root node: .aid-plan/root.plan.aid
+ * - nested nodes: .aid-plan/server/node.plan.aid, .aid-plan/server/api/node.plan.aid
  */
 function getPlanPath(outputDir: string, nodePath: string): string {
   if (nodePath === "root") {

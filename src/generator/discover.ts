@@ -1,7 +1,7 @@
 /**
  * Leaf Node Discovery
  *
- * Finds all leaf nodes (generators) in the .aid-gen/ directory.
+ * Finds all leaf nodes (generators) in the .aid-plan/ directory.
  * Leaf nodes are identified by having a .plan.aid.context.json file
  * (only leaf nodes have context files).
  */
@@ -22,28 +22,28 @@ export interface LeafNode {
 }
 
 /**
- * Discover all leaf nodes in the .aid-gen/ directory.
+ * Discover all leaf nodes in the .aid-plan/ directory.
  *
  * Leaf nodes are identified by the presence of a .plan.aid.context.json file.
  *
- * @param aidGenDir - The .aid-gen/ directory to scan
+ * @param aidPlanDir - The .aid-plan/ directory to scan
  * @returns Array of discovered leaf nodes
  */
-export async function discoverLeafNodes(aidGenDir: string): Promise<LeafNode[]> {
+export async function discoverLeafNodes(aidPlanDir: string): Promise<LeafNode[]> {
   const leaves: LeafNode[] = [];
 
   // Check root node
-  const rootContextPath = join(aidGenDir, "root.plan.aid.context.json");
+  const rootContextPath = join(aidPlanDir, "root.plan.aid.context.json");
   if (await fileExists(rootContextPath)) {
     leaves.push({
       nodePath: "root",
-      specPath: join(aidGenDir, "root.plan.aid"),
+      specPath: join(aidPlanDir, "root.plan.aid"),
       contextPath: rootContextPath,
     });
   }
 
   // Recursively scan directories
-  await scanDirectory(aidGenDir, "", leaves);
+  await scanDirectory(aidPlanDir, "", leaves);
 
   return leaves;
 }

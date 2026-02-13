@@ -19,23 +19,34 @@ const HELP_TEXT = `AIDef - AI-powered code generation from specifications
 Usage: aid [options]
 
 Options:
-  --browse    Open TUI to browse and edit generated specs
-  --build     Run build phase (generate code from leaf nodes)
-  --auth      Configure provider authentication
-  --estimate  Estimate compilation cost without running
-  --verbose   Show detailed progress
-  --help      Show this help
+  --browse          Open TUI to browse and edit generated specs
+  --build           Run build phase (generate code from leaf nodes)
+  --auth            Configure provider authentication
+  --estimate        Estimate compilation cost without running
+  --continue        Resume previous compilation from saved state
+  --verbose         Show detailed progress
+  --max-nodes=N     Maximum nodes to compile (default: 100)
+  --max-calls=N     Maximum AI calls to make (default: 100)
+  --max-parallel=N  Maximum parallel compilations (default: 10)
+  --help            Show this help
 
 Examples:
-  aid                 Compile root.aid
-  aid --browse        Open TUI
-  aid --build         Generate code
+  aid                       Compile root.aid
+  aid --continue            Resume previous compilation
+  aid --browse              Open TUI
+  aid --build               Generate code
+  aid --max-nodes=50        Limit compilation to 50 nodes
+  aid --max-parallel=5      Limit to 5 parallel AI calls
 `;
 
 export interface ParsedArgs {
   command: CLIOptions["command"];
   verbose: boolean;
   help: boolean;
+  maxNodes: number;
+  maxCalls: number;
+  maxParallel: number;
+  continueFromState: boolean;
 }
 
 export function parseArgs(args: string[]): ParsedArgs {
@@ -43,9 +54,36 @@ export function parseArgs(args: string[]): ParsedArgs {
     command: "run",
     verbose: false,
     help: false,
+    maxNodes: 10,
+    maxCalls: 20,
+    maxParallel: 10,
+    continueFromState: false,
   };
 
   for (const arg of args) {
+    // Handle --key=value style args
+    if (arg.startsWith("--max-nodes=")) {
+      const value = parseInt(arg.slice("--max-nodes=".length), 10);
+      if (!isNaN(value) && value > 0) {
+        result.maxNodes = value;
+      }
+      continue;
+    }
+    if (arg.startsWith("--max-calls=")) {
+      const value = parseInt(arg.slice("--max-calls=".length), 10);
+      if (!isNaN(value) && value > 0) {
+        result.maxCalls = value;
+      }
+      continue;
+    }
+    if (arg.startsWith("--max-parallel=")) {
+      const value = parseInt(arg.slice("--max-parallel=".length), 10);
+      if (!isNaN(value) && value > 0) {
+        result.maxParallel = value;
+      }
+      continue;
+    }
+
     switch (arg) {
       case "--browse":
         result.command = "browse";
@@ -58,6 +96,9 @@ export function parseArgs(args: string[]): ParsedArgs {
         break;
       case "--estimate":
         result.command = "estimate";
+        break;
+      case "--continue":
+        result.continueFromState = true;
         break;
       case "--verbose":
       case "-v":
@@ -82,9 +123,9 @@ export function findRootAid(cwd: string): string | null {
 }
 
 export function ensureAidGenDir(cwd: string): void {
-  const aidGenPath = join(cwd, ".aid-gen");
-  if (!existsSync(aidGenPath)) {
-    mkdirSync(aidGenPath, { recursive: true });
+  const aidPlanPath = join(cwd, ".aid-plan");
+  if (!existsSync(aidPlanPath)) {
+    mkdirSync(aidPlanPath, { recursive: true });
   }
 }
 
@@ -111,13 +152,17 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  // Create .aid-gen/ directory if it doesn't exist
+  // Create .aid-plan/ directory if it doesn't exist
   ensureAidGenDir(cwd);
 
   const options: CLIOptions = {
     command: parsed.command,
     rootPath: resolve(rootPath),
     verbose: parsed.verbose,
+    maxNodes: parsed.maxNodes,
+    maxCalls: parsed.maxCalls,
+    maxParallel: parsed.maxParallel,
+    continueFromState: parsed.continueFromState,
   };
 
   // Dispatch to appropriate command

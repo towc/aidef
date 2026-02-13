@@ -4,7 +4,7 @@
 
 AIDef operates in two distinct phases:
 
-1. **Compilation Phase**: Parse `.aid` files → generate `.plan.aid` tree in `.aid-gen/`
+1. **Compilation Phase**: Parse `.aid` files → generate `.plan.aid` tree in `.aid-plan/`
 2. **Build Phase**: Execute leaf nodes → generate code to `build/`
 
 This separation allows developers to inspect the planned changes before committing to inference costs.
@@ -32,7 +32,7 @@ aid .
 1. Look for `root.aid` in current directory
 2. Resolve all `@imports` recursively
 3. Parse CSS-like syntax, apply selectors
-4. Generate `.aid-gen/` folder structure
+4. Generate `.aid-plan/` folder structure
 5. Create `.plan.aid` and `.plan.aid.questions.json` files for each node
 
 ### Import Resolution
@@ -89,7 +89,7 @@ This in-memory approach:
 
 Each compilation agent:
 - **CAN** read: Current spec, parent context (passed in-memory), explicitly referenced files
-- **CANNOT** read: Other `.aid` files, sibling context, `.aid-gen/`, `build/`
+- **CANNOT** read: Other `.aid` files, sibling context, `.aid-plan/`, `build/`
 - **Outputs**: Child `.plan.aid` + `.plan.aid.questions.json`
 - **Passes**: Child context in-memory to children
 
@@ -168,8 +168,8 @@ Compiling root.aid...
   [4/4] Done
 
 Questions found:
-  .aid-gen/auth/node.plan.aid.questions.json: session persistence?
-  .aid-gen/server/api/node.plan.aid.questions.json: rate limits?
+  .aid-plan/auth/node.plan.aid.questions.json: session persistence?
+  .aid-plan/server/api/node.plan.aid.questions.json: rate limits?
 
 Run `aid . --browse` to review.
 Run `aid . --build` to generate code.
@@ -210,7 +210,7 @@ project/
 
 ```
 project/
-├── .aid-gen/                   # Compilation output
+├── .aid-plan/                   # Compilation output
 │   ├── root.plan.aid               # Compiled root
 │   ├── server/
 │   │   ├── node.plan.aid           # CSS-like spec
