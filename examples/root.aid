@@ -1,0 +1,82 @@
+/*
+  Task Manager API
+  
+  A demo showing how AIDef structures a project.
+  Uses CSS-like syntax for clarity, but plain English works too.
+*/
+
+A simple REST API for managing tasks and projects.
+
+// Check .env.example for environment variable requirements.
+
+// === Non-negotiable requirements ===
+TypeScript strict mode !important
+All endpoints return JSON with consistent error shapes !important
+Zod for request/response validation !important
+SQLite for persistence !important
+
+// === Suggestions (flexible) ===
+Drizzle ORM is lightweight and type-safe.
+Standard REST naming conventions.
+Proper HTTP status codes.
+
+// === Shared utilities available to all modules ===
+.shared {
+  AppError: base error class with status code and message
+  validate(): Zod schema wrapper that throws AppError on failure
+  db: database connection singleton
+}
+
+// === Module structure ===
+
+@projects {
+  CRUD operations for projects.
+  A project has: id, name, description, createdAt, updatedAt.
+  Projects contain tasks (one-to-many relationship).
+}
+
+@tasks {
+  CRUD operations for tasks.
+  A task has: id, title, description, status, priority, projectId, createdAt, updatedAt.
+  Status options: pending, in_progress, completed.
+  Priority options: low, medium, high.
+  Every task belongs to a project (required).
+}
+
+@health {
+  // Simple leaf module - no sub-modules needed
+  GET /health returns { status: "ok", timestamp }
+  Used for monitoring and deployment checks.
+}
+
+@config {
+  // Leaf
+  Load and validate environment variables.
+  Export a typed config object.
+}
+
+@errors {
+  // Leaf
+  AppError base class, NotFoundError, ValidationError, etc.
+  Error handler middleware.
+}
+
+@db {
+  // Leaf
+  SQLite connection via Drizzle.
+  Schema definitions.
+  Migration utilities.
+}
+
+@server {
+  // Leaf
+  Bun.serve() setup.
+  Route mounting.
+  Middleware chain.
+}
+
+// === Notes ===
+/*
+  Keep it simple. This is a demo, not production code.
+  Focus on showing how the AIDef tree structure works.
+*/
