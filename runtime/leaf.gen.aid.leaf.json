@@ -1,0 +1,11 @@
+{
+  "path": "/home/user/git/github/towc/aidef/runtime/leaf.gen.aid.leaf.json",
+  "dir": "/home/user/git/github/towc/aidef/runtime",
+  "prompt": "Create the `aidef` runtime. This module is responsible for executing the compiled plan. It should:\n1. Collect all `.gen.aid.leaf.json` files from the project directory.\n2. Execute leaf nodes in parallel.\n3. For each leaf:\n    - Read its `.gen.aid.leaf.json` file.\n    - Run any whitelisted commands specified in the `commands` array within the leaf's folder context.\n    - Use an AI to generate the files listed in the `files` array, based on the `prompt` in the leaf.\n    - All work (command execution, file generation) must happen within the leaf's dedicated folder.\n4. Keep the user updated on progress.\n5. Store all AI calls made during runtime in `./runtime.log.jsonl`.",
+  "files": [
+    "runtime.ts",
+    "leafExecutor.ts",
+    "logger.ts"
+  ],
+  "commands": []
+}

@@ -1,0 +1,10 @@
+{
+  "path": "/home/user/git/github/towc/aidef/parser/leaf.gen.aid.leaf.json",
+  "dir": "/home/user/git/github/towc/aidef/parser",
+  "prompt": "Create an `.aid` file parser. It should export `parse(content: string): AidNode[]` and define types for `AidNode`, `AidModule`, `AidParam`, `AidInclude`, `AidProse`. The parser must handle:\n- `include <path>;`: Replace with content from local `.aid` or HTTPS link. Recursively process `.aid` files. For non-.aid files (e.g., `.md`), escape `#` and encapsulate as prose. Mark as compile-time warning if found in `.gen.aid`.\n- `<module> { <instructions> }`: Represents a module block.\n- `<param>=<value>;`: Defines parameters. Special handling for `type=leaf;`, `path=some_path;`, `files=file1,file2;`. Treat unknown params as warnings.\n- `# comments`: Ignore everything after `#` on a line (unless escaped or in code blocks).\nThe parser should be deterministic and robust.",
+  "files": [
+    "parser.ts",
+    "aidTypes.ts"
+  ],
+  "commands": []
+}

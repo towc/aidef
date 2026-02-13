@@ -1,0 +1,11 @@
+{
+  "path": "/home/user/git/github/towc/aidef/cli/leaf.gen.aid.leaf.json",
+  "dir": "/home/user/git/github/towc/aidef/cli",
+  "prompt": "Develop the `aidef` command-line interface. It should support the following commands:\n- `--compile`: Runs the `compiler` to completion.\n- `--run`: Executes the `runtime`.\n- `--analyse`:\n    - Looks at the compiled plan and AI call logs (from compilation and runtime).\n    - Generates `.gen.aid.map` files (similar to source maps) to trace instruction flow from original `.aid` files.\n    - Generates `.gen.aid.info` files, recording miscommunications, slow responses, and suggestions for amending original human `.aid` files.\n- `--browse`:\n    - A TUI (Text User Interface) tool to inspect the compiled plan files and analysis output.\n    - Provide options to automatically or manually implement suggestions from the analysis.",
+  "files": [
+    "cli.ts",
+    "analysis.ts",
+    "tui.ts"
+  ],
+  "commands": []
+}

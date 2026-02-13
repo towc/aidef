@@ -1,0 +1,9 @@
+{
+  "path": "/home/user/git/github/towc/aidef/human_mode_processor/leaf.gen.aid.leaf.json",
+  "dir": "/home/user/git/github/towc/aidef/human_mode_processor",
+  "prompt": "Implement the 'human mode' processor. This module takes the `root.aid` file as input (or a specified `--path`). It must recursively resolve all `include` statements, fetching content from local files or HTTPS links. For non-.aid files, escape `#` characters and encapsulate as prose. The output should be a single, fully resolved `.aid` content string, which is then saved as `./node.gen.aid` in the project root. Crucially, this tool must *never* modify human-written `.aid` files.",
+  "files": [
+    "humanProcessor.ts"
+  ],
+  "commands": []
+}
