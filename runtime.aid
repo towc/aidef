@@ -1,0 +1,5 @@
+runtime {
+  collects all the leaf nodes, and starts running them in parallel;
+  keeps the user updated as it progresses;
+  stores all ai calls made in ./.aid-gen/runtime.log.jsonl;
+}

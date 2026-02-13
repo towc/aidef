@@ -4,10 +4,10 @@
   "type": "module",
   "private": true,
   "bin": {
-    "aid": "./src/cli/index.ts"
+    "aid-bootstrap": "./bootstrap.ts"
   },
   "scripts": {
-    "aid": "bun src/cli/index.ts"
+    "bootstrap": "bun bootstrap.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -19,6 +19,7 @@
     "@ai-sdk/anthropic": "^3.0.43",
     "@ai-sdk/google": "^3.0.29",
     "@ai-sdk/openai": "^3.0.28",
-    "ai": "^6.0.85"
+    "ai": "^6.0.85",
+    "zod": "^3.24.0"
   }
 }

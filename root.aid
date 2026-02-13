@@ -1,221 +1,33 @@
-/*
-  AIDef - A programming language where AI is the runtime
-  
-  This is AIDef's own root.aid, defining itself.
-  
-  Compiles .aid files into a tree of .plan.aid files,
-  then builds code from leaf nodes. No database -
-  files are the source of truth.
-*/
+aidef is a new high-level programming language that allows developers to write the source code (.aid files) of a project for an AI to build;
 
-A CLI tool that compiles .aid files into code;
+The point of a programming language is to translate human thoughts into unambiguous instructions.
+  The more high-level a language is, the easier it is for the user, typically, but not if it's at the cost of not being able to specify details, think about how e.g. javascript still has bitwise operators and some low-level tooling, despite being a high-level language, and that's one of the reasons it's so popular.
+  Aidef is no different. It's the next step above transpilation: transistors <- cpu instructions <- machine code <- assembly <- low-level language <- interpreters <- high-level language <- transpilers.
+  The aidef build tool is a transpiler from .aid files into other high- or low- level languages that have deterministic runners (e.g. typescript or python or rust or c or any combination of commonly used languages), but we do this carefully and cleverly to minimize AI inference costs and build times;
 
-// === Hard requirements ===
-TypeScript strict mode;
-Bun runtime, not Node;
-No database - files are the source of truth;
-Each submodule must be independently runnable;
+To make 
 
-// === File types ===
-aid-files {
-  // User source files, nginx-like natural language
-  parse with module blocks: name { };
-  parse query filters: "question?" { };
-  resolve include statements recursively;
-  preserve code blocks as literal prose;
-  strip comments before AI sees content;
-}
+.aid files have a parseable syntax resembling nginx configuration, except it allows for prose;
+This is the root.aid file for the aidef project, it is a good example of how .aid files look like;
 
-plan-aid-files {
-  // Generated plan nodes, same nginx-like format
-  fully resolved (no imports);
-  users can inspect and copy snippets back;
-}
+typescript/bun;
 
-plan-aid-questions-files {
-  // Questions/uncertainties, JSON format
-  users answer via --browse or direct edit;
-}
+The core of the aidef is to have a pipeline to take these .aid files into an actionable highly parallelizable plan. We call this plan generation "compilation";
 
-// === Core architecture ===
+include compiler.aid; # this means the ./compiler.aid file should be read and included here as if at the root level, almost like a string replacement. Anything after a # in a line is a comment
 
-parser {
-  parse .aid file syntax;
-  
-  lexer {
-    leaf=true;
-    tokenize: identifiers, braces, strings, numbers, semicolons;
-    handle comments and code blocks;
-    track line/column for error messages;
-  }
-  
-  ast {
-    leaf=true;
-    build tree from tokens;
-    represent: modules, query filters, parameters, prose;
-  }
-  
-  resolver {
-    leaf=true;
-    resolve include statements;
-    detect circular imports;
-    inline non-.aid files as prose;
-  }
-}
+Once everything is compiled, the developer has the option to inspect the plan and make adjustments to the human .aid files and re-compiling, before executing the plan with the runtime.
 
-compiler {
-  // Phase 1: generate .plan.aid tree from root.aid
-  
-  reads .aid files, outputs .aid-plan/ folder;
-  context passed in-memory from parent to child;
-  
-  compile-node {
-    leaf=true;
-    serialize AST to spec string;
-    call provider to compile;
-    write .plan.aid, .plan.aid.questions.json files;
-  }
-  
-  context-builder {
-    leaf=true;
-    build context for child nodes;
-    pass in-memory (not written to files);
-    include: interfaces, constraints, suggestions, utilities;
-    annotate where each directive originated;
-  }
-  
-  differ {
-    leaf=true;
-    compare new vs existing .plan.aid outputs;
-    skip subtrees with identical interfaces;
-    use interface hashes for fast comparison;
-  }
-  
-  writer {
-    leaf=true;
-    write .plan.aid, .plan.aid.questions.json files;
-    create directory structure in .aid-plan/;
-  }
-}
-
-generator {
-  // Phase 2: execute leaf nodes to produce code
-  
-  context-filter {
-    leaf=true;
-    receive context in-memory from parent;
-    determine relevant subset for this generation;
-    apply token budget limits;
-  }
-  
-  executor {
-    leaf=true;
-    invoke AI with filtered context + node.plan.aid;
-    output code to build/ folder;
-    add source comment headers;
-  }
-  
-  checks {
-    leaf=true;
-    // TODO: post-generation enforcement
-    // verify outputs match declared interfaces
-    // flag deviations for review
-  }
-}
+include runtime.aid;
 
 cli {
-  use Bun.argv for argument parsing;
-  
-  run {
-    leaf=true;
-    default mode: compile .aid tree;
-    stream questions as they appear;
-    parallel compilation of siblings;
+  --compile: runs the compiler to completion;
+  --run: executes the runtime;
+  --analyse {
+    looks at the compiled plan, the ai call logs from the compilation (and runtime if already executed), and analyses it to determine the flow of instructions via parseable .gen.aid.map files, similar to javascript source maps, indicating what line of code in the corresponding .aid file came from which line of code of which other file;
+    It also looks at whether there was some miscommunication between parent and child, or whether a node took a long time to reach an answer that could have been reached much more quickly with a small hint, then records it in a .gen.aid.info file, and provides suggestions (recursively based on the .aid.map files) on which original human .aid file should be ammended and how.
   }
-  
-  browse {
-    leaf=true;
-    TUI mode with --browse flag;
-    watch compilation progress;
-    browse .plan.aid tree structure;
-    view and answer questions inline;
-    abort early if needed;
+  --browse {
+    a tui tool to inspect the plan files and analysis output, with options to automatically (or manually) implement them.
   }
-  
-  build {
-    leaf=true;
-    --build flag: execute leaf nodes;
-    generate code to ./build/;
-    only after user approval;
-  }
-  
-  estimate {
-    leaf=true;
-    --estimate flag: show cost estimate;
-    count nodes, estimate tokens;
-    abort if exceeds --max-cost threshold;
-  }
-  
-  auth {
-    leaf=true;
-    --auth flag: TUI for LLM provider configuration;
-    support multiple providers: OpenAI, Anthropic, etc;
-    store credentials via environment variables;
-    test connection before saving;
-  }
-}
-
-providers {
-  // LLM provider abstraction via Vercel AI SDK
-  
-  common interface for all providers;
-  
-  anthropic {
-    leaf=true;
-    @ai-sdk/anthropic adapter;
-    Claude models;
-  }
-  
-  openai {
-    leaf=true;
-    @ai-sdk/openai adapter;
-    GPT models;
-  }
-  
-  call-logger {
-    leaf=true;
-    log all AI calls to calls.jsonl;
-    track tokens, duration, success/failure;
-  }
-}
-
-questions {
-  leaf=true;
-  generate .plan.aid.questions.json files for uncertainties;
-  parse answered questions;
-  inject answers into next compilation run;
-}
-
-// === Query filters (apply to matching modules) ===
-
-"is this a leaf module?" {
-  include unit tests;
-  use bun test;
-}
-
-"needs file I/O?" {
-  prefer Bun.file over fs;
-}
-
-"needs HTTP?" {
-  use Bun.serve;
-}
-
-"needs shell commands?" {
-  use Bun.$;
-}
-
-"is this a TUI component?" {
-  consider ink or blessed;
-  keep it simple - progress and tree view;
 }
