@@ -2,7 +2,7 @@
 
 ## Overview
 
-AIDef uses four file types:
+AIDef uses four file types plus a call log:
 
 | Extension | Format | Purpose | Who creates |
 |-----------|--------|---------|-------------|
@@ -10,6 +10,7 @@ AIDef uses four file types:
 | `.aidg` | CSS-like | Generated/compiled nodes | Compiler |
 | `.aidc` | YAML | Context for nodes | Compiler |
 | `.aidq` | YAML | Questions/uncertainties | Compiler |
+| `calls.jsonl` | JSONL | AI call log for debugging/benchmarking | Compiler |
 
 User `.aid` files are committed to version control. Generated files in `.aid-gen/` are gitignored.
 

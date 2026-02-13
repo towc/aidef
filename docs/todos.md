@@ -58,6 +58,7 @@ Build the deterministic foundation first.
 - [ ] Generate `.aidc` output (YAML)
 - [ ] Generate `.aidq` output (YAML) for uncertainties
 - [ ] Write to `.aid-gen/`
+- [ ] Log AI call to `.aid-gen/calls.jsonl`
 
 ### Phase 5: Recursive Compilation
 - [ ] Walk tree, compile each node
@@ -218,6 +219,33 @@ interface Provider {
   generate(spec: string, context: FilteredContext): Promise<GenerationResult>;
   testConnection(): Promise<boolean>;
 }
+```
+
+### `CallLog` (AI call tracking)
+```typescript
+interface CallLogEntry {
+  id: string;                    // unique call ID
+  timestamp: string;             // ISO 8601
+  node: string;                  // e.g. "root" or "server/api"
+  phase: 'compile' | 'generate'; // which phase
+  provider: string;              // e.g. "anthropic"
+  model: string;                 // e.g. "claude-sonnet-4-20250514"
+  
+  // Full content for inspection
+  input: string;                 // full prompt sent
+  output: string;                // full response received
+  
+  // Metrics
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms: number;
+  
+  success: boolean;
+  error?: string;                // if failed
+}
+
+// Written to .aid-gen/calls.jsonl, one JSON object per line
+// Can get large - consider rotation/cleanup for long-running projects
 ```
 
 ---
