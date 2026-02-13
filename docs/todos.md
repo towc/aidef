@@ -74,27 +74,21 @@ The MVP foundation is complete. All core components work with nginx-like syntax.
 
 ---
 
-## Current Phase: Build Phase
+#### Phase 8: Build Phase (Code Generation) ✅
+- [x] Implement `executeGenerator()` - AI generates code from leaf spec
+- [x] Leaf node discovery via `.plan.aid.context.json` marker files
+- [x] Write generated files to `build/`
+- [x] Add source comment header to generated files (traceability)
+- [x] Parallel execution of independent generators
+- [x] Progress reporting during build phase
+- [x] Handle generation failures gracefully
+- [x] CLI `--build` command integration
 
-### Phase 8: Build Phase (Code Generation) - Current
+---
 
-The runtime/executor phase. Generator nodes (leaf plan nodes) are executed by the AI to produce generated code.
+## Current Phase: TUI
 
-#### Output Contract
-- Generator nodes write files in a **1:many** relationship
-- Parent specifies what files each generator should produce
-- Enforced during compilation as a sanity check
-
-#### Tasks
-- [ ] Define `GeneratorNode` interface (what a leaf needs to generate)
-- [ ] Implement `executeGenerator()` - AI generates code from leaf spec
-- [ ] Write generated files to `build/`
-- [ ] Add source comment header to generated files (traceability)
-- [ ] Parallel execution of independent generators
-- [ ] Progress reporting during build phase
-- [ ] Handle generation failures gracefully
-
-### Phase 9: TUI (`--browse`)
+### Phase 9: TUI (`--browse`) - Current
 - [ ] Tree view of `.aid-gen/` structure
 - [ ] View node content
 - [ ] View/answer `.plan.aid.questions.json` questions
