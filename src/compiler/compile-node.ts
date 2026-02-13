@@ -23,6 +23,7 @@ import type {
 } from "../types/index.js";
 import { buildChildContext, buildNodePath } from "./context-builder.js";
 import { writeAidgFile, writeAidcFile, writeAidqFile } from "./writer.js";
+import { diffNode, addCacheMetadata, hashContent, hashContext } from "./differ.js";
 
 /**
  * Result of compiling a single node.
@@ -38,6 +39,20 @@ export interface CompileNodeResult {
   questions: NodeQuestions["questions"];
   /** Errors encountered during compilation */
   errors: string[];
+  /** Whether this node was skipped due to caching */
+  skipped: boolean;
+  /** Reason for skip/recompile decision */
+  cacheStatus?: string;
+}
+
+/**
+ * Options for node compilation.
+ */
+export interface CompileOptions {
+  /** Whether to use caching (skip unchanged nodes) */
+  useCache?: boolean;
+  /** Whether to log cache decisions */
+  verbose?: boolean;
 }
 
 /**
@@ -45,22 +60,26 @@ export interface CompileNodeResult {
  *
  * This function:
  * 1. Converts the AST node to a spec string
- * 2. Calls the provider to compile it
- * 3. Writes the .aidg, .aidc, and .aidq files
- * 4. Returns info about children to compile next
+ * 2. Checks cache to see if recompilation is needed
+ * 3. Calls the provider to compile it (if needed)
+ * 4. Writes the .aidg, .aidc, and .aidq files
+ * 5. Returns info about children to compile next
  *
  * @param node - The AST node to compile
  * @param parentContext - Context from the parent node
  * @param provider - The AI provider to use for compilation
  * @param outputDir - The .aid-gen/ directory
+ * @param options - Compilation options (caching, verbosity)
  * @returns CompileNodeResult with children and status
  */
 export async function compileNode(
   node: ASTNode,
   parentContext: NodeContext,
   provider: Provider,
-  outputDir: string
+  outputDir: string,
+  options: CompileOptions = {}
 ): Promise<CompileNodeResult> {
+  const { useCache = true, verbose = false } = options;
   const errors: string[] = [];
 
   // Get node name and parameters
@@ -90,6 +109,37 @@ export async function compileNode(
     parameters: mergedParams,
   };
 
+  // Check cache if enabled
+  if (useCache) {
+    const diff = await diffNode(nodePath, spec, parentContext, outputDir);
+    
+    if (!diff.needsRecompile && diff.cachedContext) {
+      // Cache hit - skip compilation
+      if (verbose) {
+        console.log(`  [cache] ${nodePath}: ${diff.reason}`);
+      }
+      
+      // Still need to return the cached children info
+      // We don't have child specs cached, but we can check if it was a leaf
+      const cachedIsLeaf = !diff.cachedContext.interfaces || 
+        Object.keys(diff.cachedContext.interfaces).length === 0;
+      
+      return {
+        nodePath,
+        isLeaf: cachedIsLeaf,
+        children: [], // Cached nodes don't return children for re-compilation
+        questions: [],
+        errors: [],
+        skipped: true,
+        cacheStatus: diff.reason,
+      };
+    }
+    
+    if (verbose && diff.needsRecompile) {
+      console.log(`  [recompile] ${nodePath}: ${diff.reason}`);
+    }
+  }
+
   // Write the .aidg file (the spec)
   try {
     await writeAidgFile(outputDir, nodePath, spec);
@@ -105,9 +155,12 @@ export async function compileNode(
 
   if ((isExplicitLeaf || !hasModuleChildren) && isSmallSpec(spec)) {
     // This is a leaf node - no need to call the provider for compilation
-    // Write context and return
+    // Write context with cache metadata
     try {
-      await writeAidcFile(outputDir, nodePath, nodeContext);
+      const contextWithCache = useCache 
+        ? addCacheMetadata(nodeContext, "", "") // Empty hashes for leaf nodes
+        : nodeContext;
+      await writeAidcFile(outputDir, nodePath, contextWithCache);
     } catch (err) {
       errors.push(`Failed to write .aidc file for ${nodePath}: ${err}`);
     }
@@ -118,6 +171,8 @@ export async function compileNode(
       children: [],
       questions: [],
       errors,
+      skipped: false,
+      cacheStatus: "Leaf node (no compilation needed)",
     };
   }
 
@@ -137,6 +192,8 @@ export async function compileNode(
       children: [],
       questions: [],
       errors,
+      skipped: false,
+      cacheStatus: "Compilation failed",
     };
   }
 
@@ -194,9 +251,16 @@ export async function compileNode(
     );
   }
 
-  // Write the .aidc file (context)
+  // Write the .aidc file (context) with cache metadata
   try {
-    await writeAidcFile(outputDir, nodePath, finalContext);
+    const contextWithCache = useCache
+      ? addCacheMetadata(
+          finalContext,
+          hashContent(spec),
+          hashContext(parentContext)
+        )
+      : finalContext;
+    await writeAidcFile(outputDir, nodePath, contextWithCache);
   } catch (err) {
     errors.push(`Failed to write .aidc file for ${nodePath}: ${err}`);
   }
@@ -225,6 +289,8 @@ export async function compileNode(
     children: compileResult.children,
     questions: compileResult.questions,
     errors,
+    skipped: false,
+    cacheStatus: "Compiled successfully",
   };
 }
 
@@ -235,15 +301,17 @@ export async function compileNode(
  * @param rootContext - The root context
  * @param provider - The AI provider
  * @param outputDir - The .aid-gen/ directory
+ * @param options - Compilation options
  * @returns CompileNodeResult
  */
 export async function compileRootNode(
   rootNode: RootNode,
   rootContext: NodeContext,
   provider: Provider,
-  outputDir: string
+  outputDir: string,
+  options?: CompileOptions
 ): Promise<CompileNodeResult> {
-  return compileNode(rootNode, rootContext, provider, outputDir);
+  return compileNode(rootNode, rootContext, provider, outputDir, options);
 }
 
 // =============================================================================

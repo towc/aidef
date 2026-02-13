@@ -8,6 +8,7 @@ export {
   compileNode,
   compileRootNode,
   type CompileNodeResult,
+  type CompileOptions,
 } from "./compile-node.js";
 
 export {
@@ -24,3 +25,14 @@ export {
   readAidcFile,
   readAidqFile,
 } from "./writer.js";
+
+export {
+  diffNode,
+  addCacheMetadata,
+  extractCacheMetadata,
+  hashContent,
+  hashContext,
+  summarizeChanges,
+  type DiffResult,
+  type CacheMetadata,
+} from "./differ.js";

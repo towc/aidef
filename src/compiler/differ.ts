@@ -1,0 +1,292 @@
+/**
+ * Differ
+ *
+ * Compares compiled nodes to detect changes and enable incremental builds.
+ * Uses content hashing to determine if a node needs recompilation.
+ */
+
+import { createHash } from "node:crypto";
+import type { NodeContext, ASTNode, ModuleNode } from "../types/index.js";
+import { readAidgFile, readAidcFile } from "./writer.js";
+
+/**
+ * Result of comparing a node's current state to its cached state.
+ */
+export interface DiffResult {
+  /** Whether the node needs recompilation */
+  needsRecompile: boolean;
+  /** Reason for the decision */
+  reason: string;
+  /** Hash of the current spec (for caching) */
+  specHash: string;
+  /** Hash of the parent context (for caching) */
+  contextHash: string;
+  /** Existing cached context (if available and valid) */
+  cachedContext?: NodeContext;
+}
+
+/**
+ * Cache entry stored in .aidc files for diffing purposes.
+ */
+export interface CacheMetadata {
+  /** Hash of the .aidg spec that produced this context */
+  specHash: string;
+  /** Hash of the parent context used during compilation */
+  parentContextHash: string;
+  /** Timestamp of compilation */
+  compiledAt: string;
+}
+
+/**
+ * Compare a node's current state to its cached state.
+ *
+ * @param nodePath - The node path (e.g., "server/api")
+ * @param currentSpec - The current spec content
+ * @param parentContext - The current parent context
+ * @param outputDir - The .aid-gen/ directory
+ * @returns DiffResult indicating whether recompilation is needed
+ */
+export async function diffNode(
+  nodePath: string,
+  currentSpec: string,
+  parentContext: NodeContext,
+  outputDir: string
+): Promise<DiffResult> {
+  const specHash = hashContent(currentSpec);
+  const contextHash = hashContext(parentContext);
+
+  // Try to read existing cached files
+  const [existingSpec, existingContext] = await Promise.all([
+    readAidgFile(outputDir, nodePath),
+    readAidcFile(outputDir, nodePath),
+  ]);
+
+  // No cached files - needs compilation
+  if (!existingSpec || !existingContext) {
+    return {
+      needsRecompile: true,
+      reason: "No cached compilation found",
+      specHash,
+      contextHash,
+    };
+  }
+
+  // Check if spec has changed
+  const existingSpecHash = hashContent(existingSpec);
+  if (specHash !== existingSpecHash) {
+    return {
+      needsRecompile: true,
+      reason: "Spec content has changed",
+      specHash,
+      contextHash,
+      cachedContext: existingContext,
+    };
+  }
+
+  // Check if cache metadata exists and matches
+  const cacheMetadata = extractCacheMetadata(existingContext);
+  if (!cacheMetadata) {
+    return {
+      needsRecompile: true,
+      reason: "No cache metadata in existing context",
+      specHash,
+      contextHash,
+      cachedContext: existingContext,
+    };
+  }
+
+  // Check if parent context has changed
+  if (cacheMetadata.parentContextHash !== contextHash) {
+    return {
+      needsRecompile: true,
+      reason: "Parent context has changed",
+      specHash,
+      contextHash,
+      cachedContext: existingContext,
+    };
+  }
+
+  // Everything matches - no recompilation needed
+  return {
+    needsRecompile: false,
+    reason: "Cached compilation is valid",
+    specHash,
+    contextHash,
+    cachedContext: existingContext,
+  };
+}
+
+/**
+ * Add cache metadata to a NodeContext for future diffing.
+ *
+ * @param context - The NodeContext to augment
+ * @param specHash - Hash of the spec that produced this context
+ * @param parentContextHash - Hash of the parent context
+ * @returns A new NodeContext with cache metadata
+ */
+export function addCacheMetadata(
+  context: NodeContext,
+  specHash: string,
+  parentContextHash: string
+): NodeContext & { _cache: CacheMetadata } {
+  return {
+    ...context,
+    _cache: {
+      specHash,
+      parentContextHash,
+      compiledAt: new Date().toISOString(),
+    },
+  };
+}
+
+/**
+ * Extract cache metadata from a NodeContext if present.
+ */
+export function extractCacheMetadata(
+  context: NodeContext
+): CacheMetadata | null {
+  const cacheData = (context as NodeContext & { _cache?: CacheMetadata })._cache;
+  if (!cacheData || !cacheData.specHash || !cacheData.parentContextHash) {
+    return null;
+  }
+  return cacheData;
+}
+
+/**
+ * Hash a string content using SHA-256.
+ */
+export function hashContent(content: string): string {
+  return createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+
+/**
+ * Hash a NodeContext for comparison.
+ * Only hashes the fields that affect child compilation.
+ */
+export function hashContext(context: NodeContext): string {
+  // Create a deterministic representation of the context
+  // Only include fields that affect how children are compiled
+  const relevantData = {
+    // Ancestry affects how children build their paths
+    ancestry: context.ancestry,
+    // Parameters affect child behavior
+    parameters: context.parameters,
+    // Interfaces that children might reference
+    interfaces: sortObject(context.interfaces),
+    // Constraints that children must follow
+    constraints: context.constraints.map((c) => c.rule).sort(),
+    // Suggestions for children
+    suggestions: context.suggestions.map((s) => s.rule).sort(),
+    // Utilities available to children
+    utilities: context.utilities.map((u) => `${u.name}:${u.signature}`).sort(),
+    // Query filters that might affect children
+    queryFilters: context.queryFilters.map((q) => q.question).sort(),
+  };
+
+  const json = JSON.stringify(relevantData);
+  return hashContent(json);
+}
+
+/**
+ * Sort an object's keys for deterministic JSON serialization.
+ */
+function sortObject<T extends Record<string, unknown>>(obj: T): T {
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(obj).sort()) {
+    sorted[key] = obj[key];
+  }
+  return sorted as T;
+}
+
+/**
+ * Check if an AST node has structural changes compared to its cached version.
+ * This is a quick check before doing full diff.
+ */
+export function hasStructuralChanges(
+  node: ASTNode,
+  cachedContext: NodeContext | null
+): boolean {
+  if (!cachedContext) {
+    return true; // No cache, assume changes
+  }
+
+  // For module nodes, check if the child structure has changed
+  if (node.type === "module") {
+    const moduleNode = node as ModuleNode;
+    const childModules = moduleNode.children.filter(
+      (c) => c.type === "module" || c.type === "query_filter"
+    );
+
+    // TODO: Compare child structure with cached children
+    // For now, return false (no structural changes detected)
+    // This is conservative - we'll still do content diffing
+  }
+
+  return false;
+}
+
+/**
+ * Generate a summary of what changed between old and new context.
+ */
+export function summarizeChanges(
+  oldContext: NodeContext | null,
+  newContext: NodeContext
+): string[] {
+  const changes: string[] = [];
+
+  if (!oldContext) {
+    changes.push("New node (no previous compilation)");
+    return changes;
+  }
+
+  // Check interfaces
+  const oldInterfaces = new Set(Object.keys(oldContext.interfaces));
+  const newInterfaces = new Set(Object.keys(newContext.interfaces));
+
+  for (const iface of newInterfaces) {
+    if (!oldInterfaces.has(iface)) {
+      changes.push(`Added interface: ${iface}`);
+    }
+  }
+  for (const iface of oldInterfaces) {
+    if (!newInterfaces.has(iface)) {
+      changes.push(`Removed interface: ${iface}`);
+    }
+  }
+
+  // Check constraints
+  const oldConstraints = new Set(oldContext.constraints.map((c) => c.rule));
+  const newConstraints = new Set(newContext.constraints.map((c) => c.rule));
+
+  for (const rule of newConstraints) {
+    if (!oldConstraints.has(rule)) {
+      changes.push(`Added constraint: ${rule.slice(0, 50)}...`);
+    }
+  }
+  for (const rule of oldConstraints) {
+    if (!newConstraints.has(rule)) {
+      changes.push(`Removed constraint: ${rule.slice(0, 50)}...`);
+    }
+  }
+
+  // Check utilities
+  const oldUtilities = new Set(oldContext.utilities.map((u) => u.name));
+  const newUtilities = new Set(newContext.utilities.map((u) => u.name));
+
+  for (const util of newUtilities) {
+    if (!oldUtilities.has(util)) {
+      changes.push(`Added utility: ${util}`);
+    }
+  }
+  for (const util of oldUtilities) {
+    if (!newUtilities.has(util)) {
+      changes.push(`Removed utility: ${util}`);
+    }
+  }
+
+  if (changes.length === 0) {
+    changes.push("Minor changes (no interface/constraint/utility changes)");
+  }
+
+  return changes;
+}
