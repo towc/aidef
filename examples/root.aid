@@ -29,13 +29,13 @@ Proper HTTP status codes.
 
 // === Module structure ===
 
-@projects {
+projects {
   CRUD operations for projects.
   A project has: id, name, description, createdAt, updatedAt.
   Projects contain tasks (one-to-many relationship).
 }
 
-@tasks {
+tasks {
   CRUD operations for tasks.
   A task has: id, title, description, status, priority, projectId, createdAt, updatedAt.
   Status options: pending, in_progress, completed.
@@ -43,32 +43,32 @@ Proper HTTP status codes.
   Every task belongs to a project (required).
 }
 
-@health {
+health {
   // Simple leaf module - no sub-modules needed
   GET /health returns { status: "ok", timestamp }
   Used for monitoring and deployment checks.
 }
 
-@config {
+config {
   // Leaf
   Load and validate environment variables.
   Export a typed config object.
 }
 
-@errors {
+errors {
   // Leaf
   AppError base class, NotFoundError, ValidationError, etc.
   Error handler middleware.
 }
 
-@db {
+db {
   // Leaf
   SQLite connection via Drizzle.
   Schema definitions.
   Migration utilities.
 }
 
-@server {
+server {
   // Leaf
   Bun.serve() setup.
   Route mounting.

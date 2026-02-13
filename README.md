@@ -50,16 +50,28 @@ TypeScript strict mode !important
 Zod for validation !important
 Prisma for database access would be nice.
 
-@auth {
+auth {
   login, logout, sessions
 }
 
-@users {
+users {
   CRUD operations
 }
 
-@config {
+config {
   load env vars
+}
+```
+
+Import other `.aid` files:
+
+```aid
+@./core-requirements
+@./shared-conventions
+
+server {
+  @./server-config
+  REST endpoints
 }
 ```
 
@@ -68,15 +80,15 @@ Run:
 aid .
 ```
 
-AIDef generates a tree of `.aid` files, each scoped to its task. Inspect, approve, then build.
+AIDef compiles to `.aid-gen/` with `.aidg` files. Inspect, approve, then build.
 
 ## How It Works
 
-1. **Compilation**: Parse `root.aid` → generate `.aid` tree (no code yet)
-2. **Review**: Inspect the tree, answer questions in `.aiq` files
+1. **Compilation**: Parse `root.aid` → generate `.aidg` tree in `.aid-gen/`
+2. **Review**: Inspect the tree, answer questions in `.aidq` files
 3. **Build**: Execute leaf nodes → generate code to `build/`
 
-Each node is isolated—can't read siblings, receives only explicit context. This enables true parallelization and enforces modularity.
+Each node is isolated—can't read siblings, receives context via `.aidc` files. This enables true parallelization and enforces modularity.
 
 ## Installation
 
@@ -91,14 +103,24 @@ aid .              # Compile .aid tree
 aid . --browse     # Interactive TUI
 aid . --build      # Generate code
 aid . --estimate   # Cost estimate
+aid . --auth       # Configure LLM providers
 ```
+
+## LLM Providers
+
+AIDef works with any LLM provider:
+- OpenAI, Anthropic, Google
+- Local models via Ollama
+- OpenRouter, Together, etc.
+
+Configure with `aid . --auth` or via environment variables.
 
 ## Documentation
 
 - [Philosophy](docs/philosophy.md) - Core concepts, the "programming language for AI" idea
 - [Execution Flow](docs/flow.md) - Compilation and build phases
 - [Performance](docs/performance.md) - Parallelization and caching
-- [File Formats](docs/file-formats.md) - `.aid` and `.aiq` specifications
+- [File Formats](docs/file-formats.md) - `.aid`, `.aidg`, `.aidc`, `.aidq` specifications
 - [Isolation](docs/isolation.md) - Agent sandboxing
 
 ## Status

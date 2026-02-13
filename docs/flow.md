@@ -4,12 +4,21 @@
 
 AIDef operates in two distinct phases:
 
-1. **Compilation Phase**: Parse `.aid` files, generate the task tree, produce child `.aid` + `.aidc` files
-2. **Build Phase**: Execute leaf nodes to generate actual code files
+1. **Compilation Phase**: Parse `.aid` files → generate `.aidg` tree in `.aid-gen/`
+2. **Build Phase**: Execute leaf nodes → generate code to `build/`
 
 This separation allows developers to inspect the planned changes before committing to inference costs.
 
 No database—files are the source of truth. Each submodule can run independently.
+
+## File Types
+
+| Extension | Format | Purpose |
+|-----------|--------|---------|
+| `.aid` | CSS-like | User source files (committed) |
+| `.aidg` | CSS-like | Generated nodes (gitignored) |
+| `.aidc` | YAML | Context for nodes (gitignored) |
+| `.aidq` | YAML | Questions (gitignored) |
 
 ## Phase 1: Compilation
 
@@ -20,27 +29,40 @@ aid .
 ```
 
 1. Look for `root.aid` in current directory
-2. If `.aid/` folder doesn't exist, create it
-3. Begin recursive compilation
+2. Resolve all `@imports` recursively
+3. Parse CSS-like syntax, apply selectors
+4. Generate `.aid-gen/` folder structure
+5. Create `.aidg`, `.aidc`, `.aidq` files for each node
+
+### Import Resolution
+
+Before compilation, all imports are resolved:
+
+```aid
+// root.aid
+@server           // pulls in ./server.aid
+@./auth           // pulls in ./auth.aid
+
+server {
+  @./server-db    // scoped import
+}
+```
+
+Imports are pure text substitution. The result is a single resolved tree.
 
 ### Node Processing
 
-For each `.aid` file (starting with `root.aid`):
+For each node in the resolved tree:
 
 ```
-node.aid + node.aidc (if exists)
-    │
-    ├── [Context Filter Agent]
-    │   Reads: node.aidc (all potentially relevant context)
-    │   Outputs: Filtered context relevant for this generation
-    │   Future: "Skills" system triggers rules based on keywords
+Resolved spec
     │
     ├── [Compilation Agent]
-    │   Reads: node.aid + filtered context
+    │   Reads: spec + parent's .aidc (if exists)
     │   Outputs:
-    │     - Child node.aid files (specs)
-    │     - Child node.aidc files (full context for children)
-    │     - node.aiq (uncertainties)
+    │     - node.aidg (resolved spec, CSS-like)
+    │     - node.aidc (context for children, YAML)
+    │     - node.aidq (questions, YAML)
     │
     └── [Parallel recursion into children]
 ```
@@ -49,67 +71,65 @@ node.aid + node.aidc (if exists)
 
 The `.aidc` file contains **all context that might be relevant** to children:
 
-```json
-{
-  "module": "auth",
-  "ancestry": ["root", "server", "auth"],
-  "interfaces": { ... },
-  "constraints": [ ... ],
-  "conventions": [ ... ],
-  "utilities": [ ... ]
-}
+```yaml
+module: server.api
+ancestry: [root, server, api]
+tags: [api, http]
+
+interfaces:
+  ApiResponse:
+    source: root
+    definition: "..."
+
+constraints:
+  - rule: TypeScript strict mode
+    source: root
+    important: true
+
+utilities:
+  - name: validateRequest
+    signature: "..."
+    location: utils/validate.ts
 ```
 
-Before generation, a **context filter agent** decides what subset is actually needed. This keeps generation focused while preserving full context.
-
-After generation, the compilation agent produces a new `.aidc` for each child, containing everything that *might* be relevant to grandchildren.
+Before generation, a **context filter agent** decides what subset is actually needed.
 
 ### Sandboxing Rules
 
 Each compilation agent:
-- **CAN** read: Current `node.aid`, current `node.aidc`, explicitly referenced files
-- **CANNOT** read: Other `.aid` files, sibling `.aidc`, `.aid/` folder, `build/` folder
-- **Outputs**: Child `node.aid` + child `node.aidc` + `node.aiq`
-
-This enforces true isolation—nodes cannot "peek" at sibling implementations.
+- **CAN** read: Current spec, current `.aidc`, explicitly referenced files
+- **CANNOT** read: Other `.aid` files, sibling `.aidc`, `.aid-gen/`, `build/`
+- **Outputs**: Child `.aidg` + child `.aidc` + `.aidq`
 
 ### Uncertainty Handling
 
 When an agent encounters ambiguity:
-1. Log the uncertainty to `node.aiq` in the current folder
+1. Log to `node.aidq` (YAML format)
 2. Continue with best-effort interpretation
-3. Mark affected outputs as potentially needing revision
-
-`.aiq` files accumulate per-folder, allowing targeted review.
+3. User reviews via `--browse` or edits `.aidq` directly
 
 ## Phase 2: Build
 
 ### Triggering Build
 
-After compilation, the developer can:
-- Review the `.aid` tree structure
-- Answer questions in `.aiq` files
-- Approve the build
-
-Build is triggered with `aid . --build`.
+After compilation:
+- Review the `.aidg` tree structure
+- Answer questions in `.aidq` files
+- Run `aid . --build`
 
 ### Leaf Node Execution
 
-Each leaf node:
-
 ```
-node.aid + node.aidc
+node.aidg + node.aidc
     │
     ├── [Context Filter Agent]
-    │   Same as compilation, but for code generation
+    │   Selects relevant subset of context
     │
     ├── [Generation Agent]
-    │   Reads: node.aid + filtered context
     │   Outputs: Code files to ./build/
     │
     └── [Post-Generation Checks] (TODO)
-        Verify: outputs match declared interfaces
-        Flag: deviations for review
+        Verify outputs match declared interfaces
 ```
 
 ### Parallel Execution
@@ -117,32 +137,28 @@ node.aid + node.aidc
 Everything runs in parallel:
 - All siblings compile simultaneously
 - All leaves build simultaneously
-- No sequential dependencies (by design)
-
-If you think you need ordering, you need better interface definitions instead.
+- No sequential dependencies
 
 ## Re-compilation (Incremental Builds)
 
-When `root.aid` or any `.aid` file is modified:
-
 ### Diffing Strategy
 
-1. **New Compilation**: Generate proposed `.aid` + `.aidc` files
-2. **Comparison Agent**: Compare new vs. existing outputs
-3. **Interface Check**: If interfaces are strictly identical → skip subtree
-4. **Propagation**: Only affected branches are recompiled
+1. **Resolve imports**: Get new resolved tree
+2. **Compare**: New vs existing `.aidg` outputs
+3. **Interface check**: If identical → skip subtree
+4. **Propagation**: Only affected branches recompile
 
 ### What Triggers Recompilation
 
-- Interface changes (function signatures, data structures)
+- Interface changes
 - New/removed child nodes
-- Constraint changes that affect children
+- Constraint changes
 
 ### What Doesn't Trigger Recompilation
 
 - Comment changes
 - Suggestion changes that don't affect interface
-- Internal implementation hints that don't cross boundaries
+- Internal hints that don't cross boundaries
 
 ## CLI Modes
 
@@ -150,77 +166,76 @@ When `root.aid` or any `.aid` file is modified:
 
 ```
 $ aid .
+Resolving imports...
 Compiling root.aid...
   [1/4] Parsing specification
   [2/4] Generating child nodes
-    - auth/node.aid + node.aidc
-    - config/node.aid + node.aidc (leaf)
-    - api/node.aid + node.aidc
+    - server/node.aidg + node.aidc
+    - auth/node.aidg + node.aidc
   [3/4] Recursive compilation...
   [4/4] Done
 
-Uncertainties found:
-  .aid/auth/node.aiq: "Should sessions persist across restarts?"
-  .aid/api/node.aiq: "What rate limits for unauthenticated requests?"
+Questions found:
+  .aid-gen/auth/node.aidq: session persistence?
+  .aid-gen/server/api/node.aidq: rate limits?
 
-Run `aid . --browse` to review and answer questions.
-Run `aid . --build` to generate code (3 leaf nodes ready).
+Run `aid . --browse` to review.
+Run `aid . --build` to generate code.
 ```
 
 ### Browse Mode: `aid . --browse`
 
-Interactive TUI that allows:
-- Watching compilation progress in real-time
-- Browsing the `.aid` tree structure
-- Viewing and answering `.aiq` questions inline
-- Aborting compilation early if something looks wrong
-- Approving/triggering build phase
+Interactive TUI:
+- Watch compilation progress
+- Browse `.aidg` tree
+- View/answer `.aidq` questions
+- Abort early if needed
+- Trigger build
 
 ### Build Mode: `aid . --build`
 
-Executes leaf nodes and generates code to `./build/`.
+Execute leaf nodes → generate code to `./build/`.
 
 ### Estimate Mode: `aid . --estimate`
 
-Shows cost estimate before running:
-- Count nodes to compile
-- Estimate tokens
-- Abort if exceeds `--max-cost` threshold
+Show cost estimate before running.
 
-## Folder Structure After Compilation
+## Folder Structure
+
+### User Files (Committed)
 
 ```
 project/
-├── root.aid                    # User's source of truth
-├── .env                        # Config (explicitly referenced)
-├── .aid/                       # Compilation artifacts
-│   ├── auth/
-│   │   ├── node.aid            # Auth module spec
-│   │   ├── node.aidc           # Context from parent (JSON)
-│   │   ├── node.aiq            # Questions about auth
-│   │   └── session/
-│   │       ├── node.aid        # Session submodule spec
-│   │       ├── node.aidc       # Context from auth (JSON)
-│   │       └── node.aiq        # Questions about sessions
-│   ├── config/
-│   │   ├── node.aid            # Leaf spec
-│   │   └── node.aidc           # Context from root
-│   └── api/
-│       ├── node.aid            # API module spec
-│       ├── node.aidc           # Context from root
-│       ├── node.aiq            # Questions about API
-│       └── routes/
-│           ├── node.aid        # Leaf spec
-│           └── node.aidc       # Context from API
-└── build/                      # Generated code (after build phase)
-    ├── auth/
-    │   └── session.ts
-    ├── config.ts
-    └── api/
-        └── routes.ts
+├── root.aid                    # Entry point
+├── server.aid                  # Module definition
+├── auth.aid                    # Module definition
+└── src/                        # Organize like code
+    ├── api.aid
+    └── models.aid
 ```
 
-Each submodule folder contains everything needed to run independently:
-- `node.aid` - The specification
-- `node.aidc` - Full context from ancestors
-- `node.aiq` - Outstanding questions (if any)
+### Generated Files (Gitignored)
+
+```
+project/
+├── .aid-gen/                   # Compilation output
+│   ├── root.aidg               # Compiled root
+│   ├── server/
+│   │   ├── node.aidg           # CSS-like spec
+│   │   ├── node.aidc           # YAML context
+│   │   ├── node.aidq           # YAML questions
+│   │   └── api/
+│   │       ├── node.aidg
+│   │       └── node.aidc
+│   └── auth/
+│       ├── node.aidg
+│       ├── node.aidc
+│       └── node.aidq
+└── build/                      # Generated code
+    ├── server/
+    │   └── api.ts
+    └── auth/
+        └── index.ts
+```
+
+Each folder in `.aid-gen/` is independently runnable with its `node.aidg` + `node.aidc`.

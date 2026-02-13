@@ -2,12 +2,16 @@
 
 ## Overview
 
-AIDef uses three file types:
-- **`.aid`** files: AI Definition files containing specifications (CSS-like natural language)
-- **`.aidc`** files: AI Definition Context files (JSON, machine-generated)
-- **`.aiq`** files: AI Questions files containing uncertainties (natural language)
+AIDef uses four file types:
 
-No database—files are the source of truth. Each submodule can run independently with its `node.aid` + `node.aidc`.
+| Extension | Format | Purpose | Who creates |
+|-----------|--------|---------|-------------|
+| `.aid` | CSS-like | User source files | User |
+| `.aidg` | CSS-like | Generated/compiled nodes | Compiler |
+| `.aidc` | YAML | Context for nodes | Compiler |
+| `.aidq` | YAML | Questions/uncertainties | Compiler |
+
+User `.aid` files are committed to version control. Generated files in `.aid-gen/` are gitignored.
 
 ## The `.aid` File Format
 
@@ -15,60 +19,37 @@ No database—files are the source of truth. Each submodule can run independentl
 
 A `.aid` file is just text. Write what you want, how you want. The AI interprets it.
 
-This is a valid `.aid` file:
-
 ```aid
 Build me a REST API for managing tasks. Use TypeScript.
 Tasks have a title, description, and status (todo/doing/done).
 I want CRUD endpoints. Keep it simple.
 ```
 
-So is this:
-
-```aid
-I need an authentication system.
-
-Requirements:
-- Users sign up with email/password
-- Passwords must be hashed (bcrypt preferred)
-- JWT tokens for sessions
-- Refresh token rotation would be nice but not critical
-
-The session handling should be its own module because
-I might want to swap it out later.
-```
-
-Both work. The AI reads your intent and acts on it.
-
 ### CSS-Like Syntax (Optional Power Features)
 
-For power users, `.aid` files support a CSS-inspired syntax that provides structure, scoping, and editor support. **This is entirely optional**—plain English always works.
+For power users, `.aid` files support a CSS-inspired syntax. Set `filetype=css` in your editor for syntax highlighting.
 
-Set `filetype=css` in your editor for syntax highlighting.
-
-#### Module Blocks: `@name { }`
-
-Define submodules with scoped instructions:
+#### Module Blocks
 
 ```aid
 A REST API for task management.
 
-@auth {
-  handle login, logout, password reset
-  JWT for sessions
+server {
+  api {
+    REST endpoints
+  }
+  
+  db {
+    PostgreSQL connection
+  }
 }
 
-@tasks {
-  CRUD operations
-  tasks belong to projects
-}
-
-@config {
-  load environment variables
+auth {
+  JWT-based sessions
 }
 ```
 
-#### Tags: `.tag { }`
+#### Tags
 
 Apply rules to all modules where the AI detects the tag is relevant:
 
@@ -82,51 +63,47 @@ Apply rules to all modules where the AI detects the tag is relevant:
   validate all inputs
   return consistent error shapes
 }
-
-@users.api.database {
-  // this module matches both tags
-}
 ```
 
-#### Universal Selector: `* { }`
+#### Imports
 
-Explicit global rules (equivalent to just writing them at the top level):
+Pull in content from other files:
 
 ```aid
-* {
-  TypeScript with strict mode
+@server                     // imports ./server.aid
+@./server                   // same
+@./server.aid               // same
+@https://example.com/x.aid  // URL import
+
+@./design-philosophy.md     // non-.aid files imported as plain text
+
+server {
+  @./server-details         // scoped import
+  must be TypeScript
 }
 ```
 
-#### Nesting
-
-Unlimited depth, but keep shallow when interfaces are well-defined:
-
-```aid
-@server {
-  @api {
-    @auth {
-      // only nest this deep if truly needed
-    }
-  }
-}
-```
+Import rules:
+- `@path` imports and inlines the file content
+- `.aid` files are parsed with selector rules
+- Other files (`.md`, `.txt`, etc.) are inlined as plain prose
+- Imports work in any user `.aid` file
 
 ### Full Selector Reference
 
 | Syntax | Meaning |
 |--------|---------|
-| `@name { }` | Named module |
+| `name { }` | Named module |
 | `.tag { }` | Tag (AI-matched to relevant modules) |
 | `* { }` | All modules |
-| `@a.tag { }` | Module `@a` that also matches `.tag` |
+| `name.tag { }` | Module that also matches tag |
 | `.tag1.tag2 { }` | Intersection (must match both tags) |
-| `:or(@a, @b) { }` | Union (matches either) |
+| `:or(a, b) { }` | Union (matches either) |
 | `:not(.tag) { }` | Exclusion |
-| `@parent @child { }` | Descendant (child anywhere under parent) |
-| `@parent > @child { }` | Direct child only |
-| `@a + @b { }` | Adjacent sibling |
-| `@a ~ @b { }` | General sibling |
+| `parent child { }` | Descendant (child anywhere under parent) |
+| `parent > child { }` | Direct child only |
+| `a + b { }` | Adjacent sibling |
+| `a ~ b { }` | General sibling |
 
 ### Pseudo-Selectors
 
@@ -134,7 +111,7 @@ Unlimited depth, but keep shallow when interfaces are well-defined:
 |--------|---------|
 | `:leaf { }` | Only leaf nodes (no children) |
 | `:root { }` | Only the root module |
-| `:has(@child) { }` | Parent containing specific child |
+| `:has(child) { }` | Parent containing specific child |
 | `:first-child { }` | First child of parent |
 | `:last-child { }` | Last child of parent |
 | `:nth-child(n) { }` | Nth child of parent |
@@ -148,7 +125,7 @@ CSS specificity rules apply. More specific selectors override general ones:
   return JSON
 }
 
-@legacy.api {
+legacy.api {
   // more specific - could override if needed
   return XML for backwards compatibility
 }
@@ -159,22 +136,14 @@ CSS specificity rules apply. More specific selectors override general ones:
 Attaches to the previous statement. Means "persist this even if child modules receive conflicting instructions":
 
 ```aid
-@transpiler {
+transpiler {
   use AST parser, not regex !important
-  
-  /*
-    This emphasis carries through to children.
-    Even if later context suggests "keep it simple, use regex",
-    this !important should win.
-  */
 }
 ```
 
-Note: `!important` is about emphasis, not specificity. CSS specificity rules handle conflicts between selectors.
-
 ### Comments (Human-Only)
 
-Comments are stripped before the AI sees the content. Use them for notes to yourself or future maintainers:
+Comments are stripped before the AI sees the content:
 
 ```aid
 /* 
@@ -182,310 +151,240 @@ Comments are stripped before the AI sees the content. Use them for notes to your
   Can span multiple lines
 */
 
-// Line comment - also supported
+// Line comment
 
-@transpiler {
-  // We tried regex in v1 - it was a disaster
-  // See incident report: docs/postmortem-001.md
+transpiler {
+  // We tried regex in v1 - disaster
   use AST parser, not regex !important
 }
 ```
 
 ### Code Blocks (No Parsing)
 
-Markdown fenced code blocks and inline code are treated as literal prose—no parsing inside:
+Markdown fenced code blocks and inline code are treated as literal prose:
 
 ````aid
-@transpiler {
+transpiler {
   output should look like this:
   
   ```typescript
   const ast = parse(source);
-  // This { } won't be parsed as a submodule
   if (ast.valid) {
     emit(ast);
   }
   ```
-  
-  Use `{}` for empty objects, not `new Object()`.
 }
 ````
 
-### Bare `{ }` = Prose
-
-If `{ }` appears without a selector prefix (`@`, `.`, `:`, `*`), it's treated as prose:
-
-```aid
-use objects {} for configuration   // prose, not a block
-functions like map() are useful    // prose, parens ok
-@api { REST endpoints }            // module block
-```
-
-**Linter warning**: The build tool warns on bare `{}` to catch typos:
-
-```
-warning: bare {} at line 12 - treating as prose
-  hint: did you mean @name {} for a module?
-```
-
 ### Execution Model
 
-**Everything runs in parallel.** All sibling modules compile and build simultaneously. Dependencies are handled by interface contracts passed from parent to child, not by execution order.
+**Everything runs in parallel.** All sibling modules compile and build simultaneously.
 
-If you think you need sequential execution, you probably need better interface definitions instead.
+## The `.aidg` File Format (Generated)
 
-## The `.aiq` File Format
+Generated nodes use the same CSS-like syntax as `.aid` files. This means:
+- Users can inspect generated specs and understand them
+- Snippets can be copied back to user `.aid` files if desired
+- Same mental model throughout
 
-### Purpose
+The difference: `.aidg` files have all imports resolved and selectors applied.
 
-`.aiq` files capture uncertainties and questions that arise during compilation. The AI doesn't block on these—it makes a best-effort assumption and logs the question for you to review.
+Example `.aidg`:
 
-### Structure
+```aid
+/*
+  Generated from: root.aid > server > api
+  Ancestry: root, server, api
+  Tags: api, http
+*/
 
-`.aiq` files are also just text. The AI writes them in a readable format:
+REST endpoints for the task manager.
+All responses are JSON.
 
+TypeScript strict mode !important
+validate all inputs with Zod !important
+
+use Hono for routing
+
+routes {
+  CRUD endpoints for tasks and projects
+}
+
+middleware {
+  auth, logging, error handling
+}
 ```
-# Questions for: auth/session
 
-## Session Persistence
+## The `.aidc` File Format (Context)
 
-The spec doesn't mention whether sessions should survive server restarts.
+Context files are YAML. They contain all information that *might* be relevant to child nodes.
 
-I'm assuming in-memory sessions (simpler), but if you want persistence,
-we'd need Redis or database storage. Let me know.
+```yaml
+module: server.api
+ancestry:
+  - root
+  - server
+  - api
+tags:
+  - api
+  - http
 
-Current assumption: in-memory
-Impact if wrong: would need to refactor session storage
+interfaces:
+  ApiResponse:
+    source: root
+    definition: |
+      interface ApiResponse<T> {
+        data: T;
+        error?: string;
+      }
 
----
+constraints:
+  - rule: TypeScript strict mode
+    source: root
+    important: true
+  - rule: validate all inputs with Zod
+    source: server
+    important: true
 
-## Token Expiration
+suggestions:
+  - rule: use Hono for routing
+    source: server.api
 
-No expiration time specified for JWT tokens.
+utilities:
+  - name: validateRequest
+    signature: "(schema: ZodSchema, req: Request) => Promise<T>"
+    location: utils/validate.ts
+    source: server
 
-Going with 24 hours as a reasonable default. Options:
-- 1 hour (more secure, worse UX)
-- 24 hours (balanced)
-- 7 days (convenient, less secure)
-- No expiration (not recommended)
+conventions:
+  - rule: prefer Bun APIs over Node
+    source: root
+    selector: "*"
+```
 
-Current assumption: 24 hours
+A **context filter agent** reads this and decides what subset is actually relevant before feeding to the generator.
 
----
+## The `.aidq` File Format (Questions)
 
-## Note: Rate Limiting
+Questions are YAML. They capture uncertainties for human review.
 
-The auth module would benefit from rate limiting on login attempts
-to prevent brute force attacks. Not implementing it since it wasn't
-specified, but flagging for consideration.
+```yaml
+module: auth.session
+
+questions:
+  - id: session-persistence
+    question: Should sessions persist across server restarts?
+    context: The spec doesn't mention persistence requirements.
+    options:
+      - label: In-memory only
+        description: Simpler, sessions lost on restart
+      - label: Redis/database
+        description: Sessions survive restarts
+    assumption: In-memory only
+    impact: Would need to refactor session storage if wrong
+
+  - id: token-expiration
+    question: What should the JWT token expiration be?
+    context: No expiration time specified.
+    options:
+      - label: 1 hour
+      - label: 24 hours
+      - label: 7 days
+    assumption: 24 hours
+    impact: Security and UX implications
+
+considerations:
+  - id: rate-limiting
+    note: Auth module would benefit from rate limiting on login attempts
+    blocking: false
 ```
 
 ### Answering Questions
 
-Edit the `.aiq` file directly or use `--browse` mode:
+Edit the `.aidq` file or use `--browse` mode:
 
-```
-## Session Persistence
-...
-
-Answer: Use Redis. We'll need persistence for horizontal scaling.
-```
-
-On the next run, answered questions inform the AI's decisions.
-
-## The `.aidc` File Format (Context)
-
-### Purpose
-
-`.aidc` files contain **all context that might be relevant** to child modules. They're JSON, machine-generated during compilation.
-
-A separate "context filter" agent reads the `.aidc` and decides what subset to actually feed to the generator. This keeps generation focused while preserving full context for edge cases.
-
-### Structure
-
-```json
-{
-  "module": "auth",
-  "parent": "server",
-  "ancestry": ["root", "server", "auth"],
-  
-  "interfaces": {
-    "User": {
-      "source": "root",
-      "definition": "{ id: string, email: string, createdAt: Date }"
-    },
-    "AuthService": {
-      "source": "server",
-      "definition": "{ login(email, password): Promise<Session> }"
-    }
-  },
-  
-  "constraints": [
-    {
-      "rule": "TypeScript strict mode",
-      "source": "root",
-      "important": true
-    },
-    {
-      "rule": "use bcrypt for password hashing",
-      "source": "server.auth",
-      "important": true
-    }
-  ],
-  
-  "conventions": [
-    {
-      "rule": "prefer Bun APIs over Node",
-      "source": "root",
-      "selector": "*"
-    }
-  ],
-  
-  "tags": ["api", "database"],
-  
-  "utilities": [
-    {
-      "name": "hashPassword",
-      "signature": "(plain: string) => Promise<string>",
-      "location": "utils/hash.ts",
-      "source": "server"
-    }
-  ]
-}
-```
-
-### Key Fields
-
-| Field | Purpose |
-|-------|---------|
-| `ancestry` | Full path from root (for debugging/context) |
-| `interfaces` | Type definitions this module should know about |
-| `constraints` | Rules that apply, with source and importance |
-| `conventions` | Style/pattern guidelines from ancestor selectors |
-| `tags` | Tags that apply to this module (for `.tag {}` matching) |
-| `utilities` | Shared utilities available (signatures, not implementations) |
-
-### Context Flow
-
-```
-root.aid
-    │
-    ├── [Compilation] outputs: auth/node.aidc
-    │   Contains: ALL potentially relevant context
-    │
-    ▼
-auth/node.aid + auth/node.aidc
-    │
-    ├── [Context Filter Agent]
-    │   Decides: What's actually relevant for auth generation?
-    │   Future: "Skills" system triggers rules based on keywords
-    │
-    ├── [Generation Agent]
-    │   Receives: node.aid + filtered context
-    │   Outputs: code or child specs
-    │
-    └── [Post-Generation Checks] (TODO)
-        Verify: outputs match declared interfaces
+```yaml
+questions:
+  - id: session-persistence
+    # ... original fields ...
+    answer: Redis/database
+    answered_by: developer
+    answered_at: 2024-01-15T10:30:00Z
 ```
 
 ## File Locations
 
-| Location | Purpose |
-|----------|---------|
-| `root.aid` | Your source of truth (you edit this) |
-| `.aid/<name>/node.aid` | Generated submodule spec |
-| `.aid/<name>/node.aidc` | Context from parent (JSON) |
-| `.aid/<name>/node.aiq` | Questions/uncertainties |
-| `build/` | Generated code |
-
-Each submodule is independently runnable: `node.aid` + `node.aidc` = complete context.
-
 ```
-.aid/
-├── auth/
-│   ├── node.aid        # Spec for auth module
-│   ├── node.aidc       # Context from parent (JSON)
-│   ├── node.aiq        # Questions about auth
-│   └── session/
-│       ├── node.aid    # Spec for session submodule
-│       ├── node.aidc   # Context from auth (JSON)
-│       └── node.aiq    # Questions about sessions
-└── config/
-    ├── node.aid        # Leaf - generates code directly
-    └── node.aidc       # Context from root
+project/
+├── root.aid                    # User's source (committed)
+├── server.aid                  # User's module (committed)  
+├── auth.aid                    # User's module (committed)
+├── src/                        # Organize .aid like code
+│   ├── api.aid
+│   └── models.aid
+├── .aid-gen/                   # Generated output (gitignored)
+│   ├── root.aidg               # Compiled root
+│   ├── server/
+│   │   ├── node.aidg           # Compiled node (CSS-like)
+│   │   ├── node.aidc           # Context (YAML)
+│   │   └── node.aidq           # Questions (YAML)
+│   └── auth/
+│       ├── node.aidg
+│       ├── node.aidc
+│       └── api/
+│           ├── node.aidg
+│           └── node.aidc
+└── build/                      # Generated code (gitignored)
 ```
 
 ## Examples
 
-### Example 1: Natural Language (No Special Syntax)
+### Example 1: Natural Language
 
 ```aid
-# Task Manager API
+A REST API for managing tasks and projects.
 
-A simple REST API for managing tasks and projects.
-
-Use TypeScript with strict mode - this is required.
+Use TypeScript with strict mode - required.
 All endpoints return JSON with consistent error shapes.
-Use Zod for validation, SQLite for the database.
-
-Drizzle ORM would be nice but I'm flexible.
+Zod for validation, SQLite for the database.
 
 The projects module handles CRUD for projects.
-Each project has many tasks.
-
 The tasks module handles CRUD for tasks.
-Tasks belong to a project (required).
-Status can be: pending, in_progress, completed.
-Priority can be: low, medium, high.
-
-Config module just loads environment variables.
-Health check endpoint returns { status: "ok" }.
-
-Include basic unit tests for all modules.
+Config module loads environment variables.
 ```
 
-### Example 2: CSS-Like Syntax (Power User)
+### Example 2: CSS-Like Syntax
 
 ```aid
 /*
   Task Manager API
-  Using CSS-like syntax for structure and editor support
 */
 
-A simple REST API for managing tasks and projects.
+A REST API for managing tasks and projects.
 
-// Global requirements
 TypeScript strict mode !important
-All endpoints return JSON with consistent error shapes.
-Zod for validation, SQLite for persistence.
+JSON responses !important
+Zod for validation !important
+SQLite for persistence
 
 .database {
   use Drizzle ORM
   handle connection errors gracefully
 }
 
-@projects.database {
+projects.database {
   CRUD operations
-  has many tasks (one-to-many)
-  fields: id, name, description, createdAt, updatedAt
+  has many tasks
 }
 
-@tasks.database {
-  CRUD operations  
-  belongs to project (required)
-  fields: id, title, description, status, priority, projectId, createdAt, updatedAt
-  status enum: pending, in_progress, completed
-  priority enum: low, medium, high
+tasks.database {
+  CRUD operations
+  belongs to project
 }
 
-@config {
+config {
   load environment variables
-  validate required config exists
   export typed config object
-}
-
-@health {
-  GET /health returns { status: "ok", timestamp }
 }
 
 :leaf {
@@ -493,115 +392,24 @@ Zod for validation, SQLite for persistence.
 }
 ```
 
-### Example 3: AIDef's Own `root.aid`
-
-This is what `root.aid` would look like for the AIDef project itself:
+### Example 3: With Imports
 
 ```aid
-/*
-  AIDef - A programming language where AI is the runtime
-  
-  This file defines AIDef using AIDef syntax.
-  Meta, but useful as a reference.
-*/
+// root.aid
+@./core-requirements
+@./shared-conventions
 
-// Project overview
-A CLI tool that compiles .aid files into a tree structure,
-then builds code from leaf nodes.
-
-TypeScript strict mode !important
-Bun runtime, not Node !important
-
-.cli {
-  use Bun.argv for argument parsing
-  support --browse for TUI mode
-  support --build to execute leaf nodes
-  support --estimate for cost estimation
-}
-
-.parser {
-  handle CSS-like syntax: @module, .tag, selectors
-  preserve code blocks (```) as literal prose
-  strip // and /* */ comments before AI sees content
-  warn on bare {} (linter)
-}
-
-@compiler {
-  // Phase 1: parse root.aid, generate .aid tree
+server {
+  @./server-config
   
-  reads root.aid, outputs .aid/ folder structure
-  each node outputs interfaces for children
-  nodes cannot read siblings or .aid/ folder
-  
-  @parser.parser {
-    parse .aid file syntax
-    extract modules, tags, selectors
-    handle nesting and specificity
-  }
-  
-  @differ {
-    compare new vs existing .aid outputs
-    skip subtrees with identical interfaces
-  }
-  
-  @context {
-    determine what context to pass to children
-    annotate where each directive came from
+  api {
+    @./api-patterns
+    REST endpoints
   }
 }
 
-@tree {
-  // Manages the recursive node structure
-  
-  @node {
-    represents a single .aid file
-    tracks parent, children, status
-  }
-  
-  @scheduler {
-    parallel execution of all siblings
-    no sequential dependencies (by design)
-  }
-}
-
-@cli.cli {
-  // User-facing CLI interface
-  
-  @browse {
-    TUI for watching compilation progress
-    browse .aid tree structure
-    view and answer .aiq questions
-    abort early if needed
-  }
-  
-  @run {
-    standard mode: compile, stream .aiq items
-  }
-  
-  @build {
-    execute leaf nodes
-    generate code to ./build/
-  }
-}
-
-@questions {
-  // .aiq file handling
-  
-  generate .aiq files for uncertainties
-  parse answered questions
-  inject answers into next compilation
-}
-
-:leaf {
-  include unit tests
-  use bun test
-}
-
-* {
-  prefer Bun APIs over Node equivalents
-  Bun.file over fs
-  Bun.serve if HTTP needed
-  Bun.$ for shell commands
+auth {
+  @./auth-requirements
 }
 ```
 
@@ -609,14 +417,15 @@ Bun runtime, not Node !important
 
 ## Summary
 
-| Feature | Syntax | Required? |
-|---------|--------|-----------|
-| Natural language | Just write | Yes (this is the core) |
-| Module blocks | `@name { }` | Optional |
-| Tags | `.tag { }` | Optional |
-| Pseudo-selectors | `:leaf { }`, `:has()`, etc. | Optional |
-| Strong emphasis | `!important` | Optional |
-| Comments | `/* */`, `//` | Optional |
-| Code blocks | ``` ` ``` ` ``` | Recommended for examples |
+| Feature | Syntax |
+|---------|--------|
+| Natural language | Just write |
+| Module blocks | `name { }` |
+| Tags | `.tag { }` |
+| Imports | `@path` |
+| Pseudo-selectors | `:leaf { }`, `:has()`, etc. |
+| Strong emphasis | `!important` |
+| Comments | `/* */`, `//` |
+| Code blocks | ``` ` ``` |
 
 Write what you want. The rest is just convenience.

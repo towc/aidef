@@ -106,15 +106,15 @@ TypeScript for all non-device code.
   use bit packing, avoid stored structures
 }
 
-@server {
-  @api {
+server {
+  api {
     device-specific token auth
     open-meteo for weather data
   }
 }
 
-@ui {
-  @transpiler {
+ui {
+  transpiler {
     AST parser, not regex !important
   }
 }
@@ -133,7 +133,7 @@ Just like in regular code, comments exist to explain *why* something is there—
   tried to "streamline" this twice already.
 */
 
-@auth {
+auth {
   two-factor verification is required !important
 }
 ```
@@ -162,7 +162,7 @@ This is the whole point of isolation: nodes don't read each other's output, they
 ## Non-Blocking Execution
 
 The system never asks blocking questions during execution. Instead:
-- Uncertainties are logged to `.aiq` files
+- Uncertainties are logged to `.aidq` files (YAML)
 - The developer can review and answer via `--browse` mode
 - Answers are incorporated in subsequent runs
 

@@ -3,9 +3,9 @@
   
   This is AIDef's own root.aid, defining itself.
   
-  The tool compiles .aid files into a tree structure,
-  then builds code from leaf nodes. No database - files
-  are the source of truth. Each submodule can run standalone.
+  Compiles .aid files into a tree of .aidg files,
+  then builds code from leaf nodes. No database -
+  files are the source of truth.
 */
 
 A CLI tool that compiles .aid files into code.
@@ -17,126 +17,166 @@ No database - files are the source of truth !important
 Each submodule must be independently runnable !important
 
 // === File types ===
-.aid-file {
-  // CSS-like natural language, user-written or generated
-  parse with awareness of @module, .tag, selectors
+.aid-files {
+  // User source files, CSS-like natural language
+  parse with selector rules: name {}, .tag {}, etc
+  resolve @imports recursively
   preserve ``` code blocks as literal prose
   strip // and /* */ comments before AI sees content
-  warn on bare {} without selector prefix
 }
 
-.aidc-file {
-  // JSON format, machine-generated
-  contains all context that MIGHT be relevant to children
-  a separate agent filters this before feeding to generator
+.aidg-files {
+  // Generated nodes, same CSS-like format
+  fully resolved (no imports)
+  users can inspect and copy snippets back
 }
 
-.aiq-file {
-  // natural language, machine-generated
-  questions and uncertainties for human review
+.aidc-files {
+  // Context for nodes, YAML format
+  contains all potentially relevant info from ancestors
+  context filter agent selects relevant subset
+}
+
+.aidq-files {
+  // Questions/uncertainties, YAML format
+  users answer via --browse or direct edit
 }
 
 // === Core architecture ===
 
-@parser {
+parser {
   parse .aid file syntax
   
-  @lexer {
+  lexer {
     tokenize: selectors, braces, comments, code blocks, prose
     handle nested structures
   }
   
-  @ast {
+  ast {
     build tree from tokens
     represent: modules, tags, selectors, rules, prose blocks
   }
   
-  @resolver {
+  resolver {
     apply CSS specificity rules
     merge inherited context
     resolve :or(), :not(), :has() selectors
   }
+  
+  importer {
+    resolve @path imports
+    .aid files parsed with selectors
+    other files (.md, .txt) inlined as plain text
+  }
 }
 
-@compiler {
-  // Phase 1: generate .aid tree from root.aid
+compiler {
+  // Phase 1: generate .aidg tree from root.aid
   
-  reads root.aid, outputs .aid/ folder structure
-  each node produces node.aidc with full context for children
+  reads .aid files, outputs .aid-gen/ folder
+  each node produces node.aidc with full context
   
-  @planner {
+  planner {
     determine which submodules to create
     identify leaf vs non-leaf nodes
     all siblings run in parallel
   }
   
-  @context-builder {
+  context-builder {
     gather all potentially relevant context
-    output as node.aidc (JSON)
-    include: interfaces, constraints, conventions, ancestry info
+    output as node.aidc (YAML)
+    include: interfaces, constraints, conventions, utilities
     annotate where each directive originated
   }
   
-  @differ {
-    compare new vs existing .aid outputs
+  differ {
+    compare new vs existing .aidg outputs
     skip subtrees with identical interfaces
     use interface hashes for fast comparison
   }
 }
 
-@generator {
+generator {
   // Phase 2: execute leaf nodes to produce code
   
-  @context-filter {
+  context-filter {
     read node.aidc
-    determine what subset is relevant for this specific generation
+    determine relevant subset for this generation
     // future: "skills" system triggers rules based on keywords
   }
   
-  @executor {
-    invoke AI with filtered context + node.aid
+  executor {
+    invoke AI with filtered context + node.aidg
     output code to build/ folder
   }
   
-  @checks {
+  checks {
     // TODO: post-generation enforcement
     // verify outputs match declared interfaces
     // flag deviations for review
   }
 }
 
-@cli {
+cli {
   use Bun.argv for argument parsing
   
-  @run {
+  run {
     default mode: compile .aid tree
-    stream .aiq items as they appear
+    stream .aidq items as they appear
   }
   
-  @browse {
+  browse {
     TUI mode with --browse flag
     watch compilation progress
-    browse .aid tree structure  
-    view and answer .aiq questions inline
-    abort early if something looks wrong
+    browse .aidg tree structure  
+    view and answer .aidq questions inline
+    abort early if needed
   }
   
-  @build {
+  build {
     --build flag: execute leaf nodes
     generate code to ./build/
     only after user approval
   }
   
-  @estimate {
+  estimate {
     --estimate flag: show cost estimate
     count nodes, estimate tokens
     abort if exceeds --max-cost threshold
   }
+  
+  auth {
+    --auth flag: TUI for LLM provider configuration
+    support multiple providers: OpenAI, Anthropic, Google, local models, etc
+    store credentials securely (system keychain or encrypted config)
+    allow per-project overrides via .aidrc or environment
+    test connection before saving
+  }
 }
 
-@questions {
-  generate .aiq files for uncertainties
-  parse answered questions from .aiq files
+providers {
+  // LLM provider abstraction
+  
+  common interface for all providers
+  support: OpenAI, Anthropic, Google, Ollama, OpenRouter, etc
+  
+  config {
+    global config in ~/.config/aid/
+    project config in .aidrc (gitignored)
+    environment variables as fallback
+    provider selection per task type (compile vs generate)
+  }
+  
+  adapter {
+    normalize request/response formats
+    handle rate limiting and retries
+    stream responses where supported
+  }
+}
+
+questions {
+  generate .aidq files (YAML) for uncertainties
+  parse answered questions
   inject answers into next compilation run
 }
 
@@ -155,7 +195,6 @@ Each submodule must be independently runnable !important
 }
 
 .tui {
-  // if we need terminal UI
   consider ink or blessed
-  keep it simple - just progress and tree view
+  keep it simple - progress and tree view
 }
