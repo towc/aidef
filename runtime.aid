@@ -20,7 +20,7 @@ runtime {
   Finds all leaf.json files, executes them in parallel with progress reporting.
 
   leafExecutor {
-    Executes a single leaf node using Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai).
+    Executes a single leaf node using Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai or GoogleGenerativeAI).
     
     Exports executeLeaf function and GenLeaf interface.
     
@@ -31,7 +31,11 @@ runtime {
     CRITICAL: The code generation LLM must NEVER DIVERGE from the leaf prompt instructions.
     Follow them to the letter. When the prompt specifies exact package names, class names,
     function signatures, or API patterns, use them EXACTLY as written.
-    Do NOT substitute similar-sounding alternatives (e.g., @google/generative-ai for @google/genai).
+    Do NOT substitute similar-sounding alternatives:
+      - Use @google/genai, NOT @google/generative-ai
+      - Use GoogleGenAI class, NOT GoogleGenerativeAI
+      - Use genai.chats.create(), NOT model.startChat()
+    If the prompt says "GoogleGenAI", the generated code MUST use "GoogleGenAI".
   }
 
   commandWhitelist {

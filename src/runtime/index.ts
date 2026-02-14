@@ -213,9 +213,11 @@ The write_file tool's "path" parameter should be JUST the filename (e.g., "index
 
 CRITICAL: DO NOT DIVERGE FROM THE PROMPT INSTRUCTIONS.
 - If the prompt says to use "@google/genai", use EXACTLY "@google/genai", not "@google/generative-ai"
+- If the prompt says to use "GoogleGenAI", use EXACTLY "GoogleGenAI", not "GoogleGenerativeAI"
 - If the prompt shows specific API patterns, use those EXACT patterns
 - If the prompt shows interface definitions, implement them EXACTLY as shown
-- Do not substitute similar-sounding packages, classes, or method names`;
+- Do not substitute similar-sounding packages, classes, or method names
+- NEVER use GoogleGenerativeAI - the correct class name is GoogleGenAI`;
 
     try {
       const chat = this.ai.chats.create({
