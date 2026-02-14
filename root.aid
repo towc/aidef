@@ -31,8 +31,13 @@ cli {
   Commands:
     compile [file] - compiles the given .aid file (default: root.aid) to the output directory
     run - executes a previously compiled plan from the output directory
-    analyse - analyzes the plan and suggests improvements (not yet implemented)
-    browse - TUI to inspect the plan (not yet implemented)
+    analyse {
+      looks at the compiled plan, the ai call logs from the compilation (and runtime if already executed), and analyses it to determine the flow of instructions via parseable .gen.aid.map files, similar to javascript source maps, indicating what line of code in the corresponding .aid file came from which line of code of which other file;
+      It also looks at whether there was some miscommunication between parent and child, or whether a node took a long time to reach an answer that could have been reached much more quickly with a small hint, then records it in a .gen.aid.info file, and provides suggestions (recursively based on the .aid.map files) on which original human .aid file should be amended and how.
+    }
+    browse {
+      a tui tool to inspect the plan files and analysis output, with options to automatically (or manually) implement them.
+    }
 
   Options:
     --output, -o sets the output directory (default: /tmp/aidef-<n>, incrementing n)

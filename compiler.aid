@@ -7,6 +7,10 @@ compiler {
   
   Concepts:
   
+  Human .aid files are ABSTRACT - high-level prose describing intent.
+  The compiler's job is to transform abstract prose into CONCRETE .gen.aid specifications.
+  This transformation is the core value proposition of aidef.
+  
   Nodes are responsible for generating interfaces, and planning work to be done in parallel by children they spawn.
     We generate interfaces first so that work can be parallelized - that's the core of the tool.
     Nodes can spawn other nodes with gen_node, or create leaves with gen_leaf when the task is small enough to be zero-shot by an AI.
@@ -28,13 +32,14 @@ compiler {
     The root node should spawn an initial setup leaf that runs bun init to create the project structure.
   
   Each node and leaf has its own folder in the compilation output, but files are written to outputPath locations.
+    This is possible because the parent needs to implement a clear interface for the children, and that parent can spawn a leaf to import from the other children, as decided by the interface (no runtime reading of other files).
+    It's important to do it this way to minimize drift from the original developer plans, ensure good parallelization, and enable tree-diffing.
   
-  Creates index.ts which exports:
-    export async function compile(rootFile: string, outputDir: string, apiKey: string): Promise<void>
+  Creates index.ts which exports a compile function taking rootFile, outputDir, and apiKey.
   
   The compile function:
-    1. Creates a Resolver (from ./resolver) and calls resolve(rootFile, outputDir) to get the resolved .aid path
-    2. Creates a GenCompiler (from ./gen) with apiKey and calls compile(resolvedAidPath)
+    1. Creates a Resolver and calls resolve(rootFile, outputDir) to get the resolved .aid path
+    2. Creates a GenCompiler with apiKey and calls compile(resolvedAidPath)
 
   parser {
     Deterministic parser for .aid syntax. No LLM involved.
@@ -79,62 +84,59 @@ compiler {
     LLM-powered compilation of resolved .aid into nodes and leaves.
     Creates gen.ts.
     
-    Dependencies (use exact package names):
-    ```
-    import { GoogleGenAI, Type } from '@google/genai';
-    ```
+    Uses Google Gemini for LLM calls.
     
-    Exports:
-      - GenCompiler class with compile(genAidPath: string, depth?: number) method
-    
-    Constructor takes apiKey string, creates GoogleGenAI instance:
-    ```
-    this.ai = new GoogleGenAI({ apiKey });
-    ```
+    Exports GenCompiler class with compile(genAidPath: string, depth?: number) method.
+    Constructor takes apiKey string.
     
     The compile method:
-      1. Reads the .gen.aid file content using fs.readFileSync
-      2. Checks tree diff - skip if unchanged (use TreeDiffer from ./diff)
-      3. If changed, prune old branch first
-      4. Process with LLM using ai.chats.create then chat.sendMessage
+      1. Reads the .gen.aid file content
+      2. If previous content exists, use LLM to judge semantic equivalence (via TreeDiffer)
+         If equivalent, skip this entire subtree - keep existing children
+         If different, continue to step 3
+      3. Process with LLM to spawn children (gen_node and gen_leaf tools)
+      4. For each child spawned, recurse - the child's new spec will be compared to its previous content
       5. Save content for future diffing
     
-    LLM tools to define (use Type from @google/genai for schema):
+    LLM tools:
       - gen_node: { name: string, content: string } - creates child directory with node.gen.aid
       - gen_leaf: { name: string, outputPath: string, sourceAid: string, prompt: string, files: string[], commands?: string[] }
     
-    System prompt should explain:
-      - You are an architect that decomposes specs into nodes/leaves
-      - Transform abstract prose into concrete TypeScript interfaces
-      - path= param sets output location, children inherit it
+    The system prompt is CRITICAL. It must instruct the LLM to:
+      - Act as an architect that decomposes specs into nodes/leaves
+      - TRANSFORM abstract human prose into CONCRETE TypeScript interfaces
+        Human .aid files should NOT need to specify exact function signatures.
+        The compiler figures out appropriate interfaces from context.
+      - Understand that children are ISOLATED - they only see what the parent passes.
+        This means passing FULL interface definitions, not just import statements.
+        If a child needs to access node.path, the parent must define the interface with path field.
+      - Understand path inheritance: path= sets output location, children inherit it
       - Files array contains only filenames, not paths
+      - Encapsulation: each .gen.aid node is self-contained with all needed context
     
-    Handle tool calls in a loop:
-      - Get response.functionCalls
-      - For gen_node: create directory, write node.gen.aid, recursively compile
-      - For gen_leaf: create directory, write leaf.gen.aid.leaf.json
-      - Send functionResponse back to LLM
-      - Continue until no more function calls
-    
+    Handle tool calls in a loop until no more function calls.
     Use temperature=0 for deterministic output.
     Track created children per directory to prevent duplicates.
     Track file collisions across leaves.
   }
 
   diff {
-    Caching via content comparison to skip unchanged subtrees.
+    Tree diffing to avoid unnecessary inferences during compilation.
     Creates diff.ts.
     
-    Exports:
-      - TreeDiffer class with methods:
-        - loadPrevious(genAidPath: string): string | null - reads .prev file if exists
-        - savePrevious(genAidPath: string, content: string): void - writes .prev file
-        - isUnchanged(previous: string, current: string): boolean - compares content
-        - pruneBranch(nodeDir: string): void - deletes child directories
+    When compiling, if we have the previous compiled .gen.aid content, we can avoid going deeper into that branch by checking whether the new .gen.aid content is for all practical purposes equivalent, with no deviations.
+    If it is the same, then we can keep it and all of its children, and don't need to recurse further as we'd expect the output to be the same.
     
-    Implementation:
-      - .prev files store previous content next to .gen.aid files
-      - isUnchanged does simple string comparison
-      - pruneBranch uses fs.rmSync with recursive option
+    The comparison uses LLM judgement for semantic equivalence - the new spec might use different words but mean the same thing.
+    A synonym or minor rephrasing shouldn't trigger recompilation if the meaning is unchanged.
+    
+    If the tree diff shows there would be some change, we recompile that node, which produces new child specs.
+    For each child, we recursively apply the same semantic comparison.
+    
+    This is why we want generated nodes to be predictable (temperature=0) and heavily encapsulated - to minimize spurious differences and enable effective tree diffing.
+    We want the cycle of "user makes change to code -> user sees effect of change" to be as fast as possible.
+    
+    Exports:
+      - TreeDiffer class with methods for loading/saving previous content and semantic comparison
   }
 }
