@@ -78,22 +78,38 @@ When the spec contains SPECIFIC details (package names, API patterns, function s
 
 You are passing instructions DOWN the tree. Children cannot see the original spec - they only see what you give them. If you change or omit details, they are lost forever.
 
-## PASSING SIBLING CONTEXT
+## PASSING SIBLING CONTEXT - THIS IS CRITICAL
 
-When a child needs to import from a sibling, include the FULL interface definitions.
+When a child needs to import from a sibling, you MUST include the FULL interface definitions.
+Do NOT just say "Import X from './sibling'" - that tells the child NOTHING about what X contains.
+The child cannot see other modules - it only sees what you pass in the prompt.
+
+WRONG (child has no idea what Logger is):
+  "Import { Logger } from './logger';"
+
+CORRECT (child knows the exact interface):
+  "Import { Logger } from './logger';
+   
+   Logger interface:
+   interface Logger {
+     log(type: string, nodePath: string, details: any): void;
+     close(): void;
+   }"
 
 Example: resolver needs parse() from parser:
   "PRE-EXISTING: Import { parse, AidNode, AidInclude, AidModule, AidParam, AidProse } from './parser'
    
-   Type definitions:
+   Type definitions (COPY THESE EXACTLY):
    type AidNode = AidModule | AidParam | AidInclude | AidProse;
    interface AidInclude { type: 'include'; path: string; }
    interface AidModule { type: 'module'; name: string; content: AidNode[]; }
-   ...
+   interface AidParam { type: 'param'; name: string; value: string; }
+   interface AidProse { type: 'prose'; text: string; }
    
-   Function: parse(content: string): AidNode[]"
+   Function signature: parse(content: string): AidNode[]"
 
-Include ALL type definitions the child will need to use. If they're accessing fields like \`node.path\`, they need to know the interface has a \`path\` field.
+Look at the sibling module's spec in the parent content. Extract the interface definitions from there.
+If the sibling spec says "Exports X interface with fields a, b, c", you must define that interface fully.
 
 ## CREATING ENTRY POINTS
 
@@ -113,6 +129,11 @@ Most modules are leaves - they describe what code to generate.
 Use ONLY when a module has 2+ nested \`name { }\` blocks inside it.
 If a module only has prose/text and NO nested blocks, use gen_leaf instead.
 Pass the module's content for the child node to further decompose.
+
+IMPORTANT: When creating a gen_node, if the PARENT has a path= param, include it in the child's content too!
+The child needs to know the inherited outputPath.
+Example: If parent has "path=src/compiler;" and you're creating a gen_node for "resolver", 
+the content should start with "path=src/compiler;" so the child knows where to output files.
 
 The "files" array should contain ONLY filenames (e.g., ["parser.ts", "types.ts"]).
 Do NOT include full paths like "src/compiler/parser.ts" - just the filename.
@@ -422,7 +443,7 @@ export class GenCompiler {
 
           try {
             if (call.name === 'gen_node') {
-              result = await this.handleGenNode(call.args as GenNodeArgs, nodeDir, depth);
+              result = await this.handleGenNode(call.args as GenNodeArgs, nodeDir, depth, content);
             } else if (call.name === 'gen_leaf') {
               result = await this.handleGenLeaf(call.args as GenLeafArgs, nodeDir);
             } else {
@@ -618,7 +639,8 @@ Export all public interfaces and functions as described.`;
   private async handleGenNode(
     args: GenNodeArgs, 
     parentDir: string,
-    parentDepth: number
+    parentDepth: number,
+    parentContent: string
   ): Promise<{ success: boolean; path?: string; error?: string }> {
     const { name, content } = args;
     
@@ -650,11 +672,22 @@ Export all public interfaces and functions as described.`;
     }
     this.createdChildren.get(parentDir)!.add(name);
 
+    // Extract path= from parent content and prepend to child content for inheritance
+    const pathMatch = parentContent.match(/^\s*path=([^;\s]+);?/m);
+    let childContent = content;
+    if (pathMatch) {
+      const inheritedPath = pathMatch[1];
+      // Check if child content already has a path= (it shouldn't, but be safe)
+      if (!content.match(/^\s*path=/m)) {
+        childContent = `  path=${inheritedPath};\n${content}`;
+      }
+    }
+
     // Create directory
     fs.mkdirSync(childDir, { recursive: true });
 
-    // Write child .gen.aid
-    fs.writeFileSync(childPath, content, 'utf-8');
+    // Write child .gen.aid with inherited path
+    fs.writeFileSync(childPath, childContent, 'utf-8');
     console.log(`[gen] Created node: ${childPath}`);
 
     // Recursively compile child with incremented depth

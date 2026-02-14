@@ -77,6 +77,24 @@ runtime {
     Each line is a JSON object with timestamp, type, leaf path, and details.
     Used by analyse mode to review what happened.
     
-    Exports LogEntry interface and createLogger function.
+    Exports (use EXACTLY these interfaces):
+    ```typescript
+    export interface LogEntry {
+      timestamp: string;
+      type: 'ai_call' | 'command_execution' | 'file_write' | 'error';
+      leafPath: string;
+      details: any;
+    }
+    
+    export interface Logger {
+      log(entry: Omit<LogEntry, 'timestamp'>): void;
+    }
+    
+    export function createLogger(logFilePath: string): Logger;
+    ```
+    
+    Implementation:
+      - createLogger returns a Logger that appends to the given file path
+      - log() adds timestamp and writes JSON line to the file
   }
 }

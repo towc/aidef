@@ -211,11 +211,27 @@ compiler {
       - 'node_complete': Node finished processing
       - 'error': Any errors encountered
     
-    Exports:
-      - CompileLogEntry interface with: timestamp, type, nodePath, details (any)
-      - createCompileLogger(outputDir: string) function returning a logger object
-      - Logger object has: log(type, nodePath, details), close() methods
-      - Writes to outputDir/compile.log.jsonl
+    Exports (use EXACTLY these interfaces):
+    ```typescript
+    export interface CompileLogEntry {
+      timestamp: string;
+      type: string;
+      nodePath: string;
+      details: any;
+    }
+    
+    export interface Logger {
+      log(type: string, nodePath: string, details: any): void;
+      close(): void;
+    }
+    
+    export function createCompileLogger(outputDir: string): Logger;
+    ```
+    
+    Implementation:
+      - createCompileLogger opens outputDir/compile.log.jsonl for appending
+      - log() writes a JSON line with timestamp, type, nodePath, details
+      - close() flushes and closes the file
   }
 
   diff {
