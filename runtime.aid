@@ -19,14 +19,22 @@ runtime {
   Creates index.ts which exports a run function that takes outputDir and apiKey.
   Finds all leaf.json files, executes them in parallel with progress reporting.
   
-  IMPORTANT for index.ts: Import symbols from sibling modules (leafExecutor, commandWhitelist, logger).
-  Do NOT redeclare those imported types/functions - just use them directly.
-  Only DEFINE types/interfaces that are NEW to this module.
+  CRITICAL CODE GENERATION RULES (applies to ALL modules in runtime):
+  - NEVER use ambient declarations like "export const X: Type;" or "export function f(): void;"
+  - Ambient declarations are for .d.ts files only, NOT implementation files
+  - When you import something, use it directly - do NOT re-export or redeclare it
+  - Only declare/export things you are IMPLEMENTING in this file
+  - If the prompt shows interfaces for understanding, implement them OR import them - never stub them
 
   leafExecutor {
     Executes a single leaf node using Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai or GoogleGenerativeAI).
     
     Exports executeLeaf function and GenLeaf interface.
+    
+    File system operations: use fs from 'node:fs/promises' for mkdir, readFile, etc.
+    Do NOT use Bun.mkdir or other non-existent Bun APIs.
+    Use Bun.file() for reading files, and Bun.write() for writing files.
+    Use fs.mkdir(path, { recursive: true }) for creating directories.
     
     Uses generateContent API with write_file tool to generate each file.
     Maintains conversation history for multi-turn.

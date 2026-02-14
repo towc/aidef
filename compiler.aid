@@ -5,6 +5,13 @@ compiler {
   
   The compiled tree consists of .gen.aid nodes and .leaf.json leaves.
   
+  CRITICAL CODE GENERATION RULES (applies to ALL modules in compiler):
+  - NEVER use ambient declarations like "export const X: Type;" or "export function f(): void;"
+  - Ambient declarations are for .d.ts files only, NOT implementation files
+  - When you import something, use it directly - do NOT re-export or redeclare it
+  - Only declare/export things you are IMPLEMENTING in this file
+  - If the prompt shows interfaces for understanding, implement them OR import them - never stub them
+  
   Concepts:
   
   Human .aid files are ABSTRACT - high-level prose describing intent.
@@ -106,6 +113,11 @@ compiler {
     Creates gen.ts.
     
     Uses Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai).
+    
+    File system operations: use fs from 'node:fs/promises' for mkdir, readFile, etc.
+    Do NOT use Bun.mkdir or other non-existent Bun APIs.
+    Use Bun.file() for reading files, and Bun.write() for writing files.
+    Use fs.mkdir(path, { recursive: true }) for creating directories.
     
     CRITICAL API PATTERN - use EXACTLY this code:
     ```typescript
