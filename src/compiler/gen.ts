@@ -78,6 +78,11 @@ Pass the module's content for the child node to further decompose.
 
 ### gen_leaf  
 Use when a module is simple enough to implement directly.
+
+The "files" array should contain ONLY filenames (e.g., ["parser.ts", "types.ts"]).
+Do NOT include full paths like "src/compiler/parser.ts" - just the filename.
+The path= param on the module tells where the file goes, not the files array.
+
 The prompt MUST include:
 - "Use Bun and TypeScript"
 - CONCRETE TypeScript interfaces (not abstract prose)
@@ -90,7 +95,8 @@ The prompt MUST include:
 2. **Match hierarchy** - Nested modules become nested children
 3. **No recursion** - Don't create a child with the same name as yourself
 4. **Single pass** - Make all calls in one step, then stop
-5. **Be concrete** - Transform abstract prose into specific TypeScript`;
+5. **Be concrete** - Transform abstract prose into specific TypeScript
+6. **Files are filenames only** - Not paths, just names like "index.ts"`;
 
 const MAX_DEPTH = 3; // Maximum nesting depth
 
