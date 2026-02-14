@@ -13,8 +13,6 @@ runtime {
   Finds all leaf.json files, executes them in parallel with progress reporting.
 
   leafExecutor {
-    path=src/runtime/leafExecutor.ts;
-
     Executes a single leaf node.
     
     Exports LeafConfig interface and executeLeaf function.
@@ -23,8 +21,6 @@ runtime {
   }
 
   commandWhitelist {
-    path=src/runtime/commandWhitelist.ts;
-
     Leaf nodes can request shell commands, but only whitelisted ones run.
     Users can configure additional allowed commands in .aidrc or project config.
     The analyse mode suggests new commands to whitelist based on what leaves tried to run.
@@ -34,8 +30,6 @@ runtime {
   }
 
   logger {
-    path=src/runtime/logger.ts;
-
     Stores all AI calls and command executions in runtime.log.jsonl.
     Each line is a JSON object with timestamp, type, leaf path, and details.
     Used by analyse mode to review what happened.

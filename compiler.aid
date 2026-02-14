@@ -24,8 +24,6 @@ compiler {
   First runs the resolver, then the llmCompiler.
 
   parser {
-    path=src/compiler/parser.ts;
-    
     Deterministic parser for .aid syntax. No LLM involved.
     Used by both resolver and compiler phases.
     
@@ -40,8 +38,6 @@ compiler {
   }
 
   resolver {
-    path=src/compiler/resolver.ts;
-
     Deterministic pre-processing of human-written .aid files. No LLM involved.
     Our tool never modifies human-written files - they are the source code.
     
@@ -55,8 +51,6 @@ compiler {
   }
 
   llmCompiler {
-    path=src/compiler/llmCompiler.ts;
-
     LLM-powered compilation of resolved .aid into nodes and leaves.
     
     Every node is a planner for its subtree. The root node takes extra care:
@@ -81,8 +75,6 @@ compiler {
   }
 
   treeDiff {
-    path=src/compiler/treeDiff.ts;
-
     Caching via content hashing to skip unchanged subtrees.
     
     Goal: if a developer changes one line in root.aid, only affected branches recompile.

@@ -28,8 +28,14 @@ You are NOT implementing code - you are PLANNING and DELEGATING.
 ## .aid SYNTAX
 
 - \`module { content }\` - Named module block
-- \`path=value;\` - Parameter (path= specifies output location)
+- \`path=value;\` - Parameter on parent module sets base path (children inherit it)
 - Plain text - Prose describing what the module should do
+
+## PATH INHERITANCE
+
+If parent has \`path=src/compiler;\` and child is named \`parser\`, the child's output goes to \`src/compiler/parser.ts\` (or \`src/compiler/parser/\` if it's a node with multiple files).
+
+Submodules do NOT repeat the full path - they inherit from parent.
 
 ## ARCHITECT RESPONSIBILITIES
 
