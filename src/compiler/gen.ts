@@ -101,13 +101,15 @@ IMPORTANT: Never name a leaf the same as its parent module. Use "index" instead.
 
 ## TOOLS
 
-### gen_node
-Use ONLY when a module has 2+ nested \`name { }\` blocks inside it.
-Pass the module's content for the child node to further decompose.
+### gen_leaf (DEFAULT - use this most of the time)
+Use when a module should generate code directly.
+If a module has NO nested \`name { }\` blocks inside it, you MUST use gen_leaf.
+Most modules are leaves - they describe what code to generate.
 
-### gen_leaf  
-Use when a module should generate code. This is the DEFAULT choice.
-If content has NO nested \`name { }\` blocks, you MUST use gen_leaf.
+### gen_node (RARE - only for complex hierarchies)
+Use ONLY when a module has 2+ nested \`name { }\` blocks inside it.
+If a module only has prose/text and NO nested blocks, use gen_leaf instead.
+Pass the module's content for the child node to further decompose.
 
 The "files" array should contain ONLY filenames (e.g., ["parser.ts", "types.ts"]).
 Do NOT include full paths like "src/compiler/parser.ts" - just the filename.
