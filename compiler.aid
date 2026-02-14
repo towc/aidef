@@ -35,6 +35,14 @@ compiler {
     This is possible because the parent needs to implement a clear interface for the children, and that parent can spawn a leaf to import from the other children, as decided by the interface (no runtime reading of other files).
     It's important to do it this way to minimize drift from the original developer plans, ensure good parallelization, and enable tree-diffing.
   
+  Module scope:
+    Each module { } block defines a SCOPE. A node should ONLY create children for modules that are DIRECTLY nested inside it.
+    If module A contains module B, and module B contains module C:
+      - The node for A should create a child for B (gen_node or gen_leaf)
+      - The node for A should NOT create children for C - that's B's responsibility
+    This ensures proper encapsulation and prevents duplicate/conflicting outputs.
+    A module's path= applies to that module and its children, not to sibling or parent modules.
+  
   Creates index.ts which exports a compile function taking rootFile, outputDir, and apiKey.
   
   The compile function:
@@ -113,6 +121,10 @@ compiler {
       - Understand path inheritance: path= sets output location, children inherit it
       - Files array contains only filenames, not paths
       - Encapsulation: each .gen.aid node is self-contained with all needed context
+      - RESPECT MODULE SCOPE: Only create children for modules DIRECTLY nested in the current spec.
+        Do NOT create children for deeply nested modules - let the intermediate node handle those.
+        If you see module A containing module B containing module C, only create a child for A.
+        A's child will then handle B, and B's child will handle C.
       - NEVER DIVERGE from parent instructions. Follow them to the letter.
         When the parent spec contains specific details (package names, class names, API patterns),
         preserve them EXACTLY in child prompts. Do NOT substitute similar alternatives.
