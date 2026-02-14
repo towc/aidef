@@ -317,17 +317,22 @@ export class GenCompiler {
     ];
 
     try {
-      const chat = this.ai.chats.create({
-        model: 'gemini-2.5-flash',
-        config: {
-          systemInstruction: SYSTEM_PROMPT,
-          tools: [{ functionDeclarations: tools }],
-          temperature: 0, // Deterministic for tree diffing
-        }
+      // Use models.generateContent with conversation history for multi-turn
+      const history: Array<{role: string, parts: Array<any>}> = [];
+      
+      // Initial user message with system prompt as preamble
+      history.push({
+        role: 'user',
+        parts: [{ text: `${SYSTEM_PROMPT}\n\n---\n\nProcess this .aid specification. Create appropriate child nodes and/or leaves:\n\n${content}` }]
       });
 
-      let response = await chat.sendMessage({
-        message: `Process this .aid specification. Create appropriate child nodes and/or leaves:\n\n${content}`
+      let response = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: history,
+        config: { 
+          temperature: 0,
+          tools: [{ functionDeclarations: tools }]
+        }
       });
 
       // Process tool calls in a loop
@@ -381,9 +386,16 @@ export class GenCompiler {
           break;
         }
 
-        // Send responses back to LLM with instruction to stop if done
-        response = await chat.sendMessage({
-          message: functionResponses.map(fr => ({
+        // Add model's function calls to history
+        history.push({
+          role: 'model',
+          parts: functionCalls.map(fc => ({ functionCall: { name: fc.name, args: fc.args } }))
+        });
+
+        // Add function responses to history
+        history.push({
+          role: 'function',
+          parts: functionResponses.map(fr => ({
             functionResponse: {
               name: fr.name,
               response: {
@@ -394,6 +406,16 @@ export class GenCompiler {
               }
             }
           }))
+        });
+
+        // Continue the conversation
+        response = await this.ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: history,
+          config: { 
+            temperature: 0,
+            tools: [{ functionDeclarations: tools }]
+          }
         });
       }
 

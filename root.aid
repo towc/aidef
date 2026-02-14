@@ -23,10 +23,14 @@ cli {
   
   Entry point for the aidef tool. Creates index.ts. Uses commander for arg parsing.
   
-  Imports:
-  - { compile } from './compiler'
-  - { run } from './runtime'
+  Imports and function signatures (MUST match exactly):
+  - { compile } from './compiler' - signature: compile(rootFile: string, outputDir: string, apiKey: string): Promise<void>
+  - { run } from './runtime' - signature: run(outputDir: string, apiKey: string): Promise<void>
   - Gets GEMINI_API_KEY from process.env.GEMINI_API_KEY
+  
+  IMPORTANT: Call compile and run with POSITIONAL ARGUMENTS, not an options object.
+  Example: await compile(file, outputDir, GEMINI_API_KEY)
+  NOT: compile({ file, outputDir, ... })
   
   Commands:
     compile [file] - compiles the given .aid file (default: root.aid) to the output directory
@@ -39,9 +43,14 @@ cli {
       a tui tool to inspect the plan files and analysis output, with options to automatically (or manually) implement them.
     }
 
-  Options:
-    --output, -o sets the output directory (default: /tmp/aidef-<n>, incrementing n)
+  Options (global, defined on program before commands):
+    --output, -o sets the output directory (default: /tmp/aidef-<timestamp>)
     --max-parallel limits concurrent LLM calls (default: 10)
     --max-retries for failed LLM calls (default: 3)
     --max-depth for compilation tree (default: 5)
+  
+  CRITICAL: Options are GLOBAL, not per-command. Inside action callbacks, use program.opts() to access them:
+    const opts = program.opts();
+    const outputDir = opts.output;
+  DO NOT use action callback parameters for global options.
 }

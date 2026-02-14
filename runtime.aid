@@ -24,18 +24,43 @@ runtime {
     
     Exports executeLeaf function and GenLeaf interface.
     
-    Uses a chat-based approach with a write_file tool to generate each file.
-    Continues the chat until all files in the leaf are written.
+    Uses generateContent API with write_file tool to generate each file.
+    Maintains conversation history for multi-turn.
+    Continues until all files in the leaf are written.
     Logs each file write to the logger.
     
-    CRITICAL: The code generation LLM must NEVER DIVERGE from the leaf prompt instructions.
+    CRITICAL API PATTERN - use EXACTLY this code:
+    ```typescript
+    import { GoogleGenAI, Type } from '@google/genai';
+    const genai = new GoogleGenAI({ apiKey });
+    const response = await genai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: conversationHistory,  // array of messages
+      config: { 
+        temperature: 0,
+        tools: [{ functionDeclarations: [{ 
+          name: 'write_file', 
+          description: 'Write content to a file',
+          parameters: { 
+            type: Type.OBJECT, 
+            properties: { 
+              path: { type: Type.STRING }, 
+              content: { type: Type.STRING } 
+            }, 
+            required: ['path', 'content'] 
+          } 
+        }] }]
+      }
+    });
+    // Access function calls: response.functionCalls (array of {name, args} or undefined)
+    // For multi-turn: add function calls/responses to history and call generateContent again
+    ```
+    IMPORTANT: tools MUST be inside config object, NOT at the top level.
+    NEVER use getGenerativeModel(), model.startChat(), or @google/generative-ai patterns.
+    
+    The code generation LLM must NEVER DIVERGE from the leaf prompt instructions.
     Follow them to the letter. When the prompt specifies exact package names, class names,
     function signatures, or API patterns, use them EXACTLY as written.
-    Do NOT substitute similar-sounding alternatives:
-      - Use @google/genai, NOT @google/generative-ai
-      - Use GoogleGenAI class, NOT GoogleGenerativeAI
-      - Use genai.chats.create(), NOT model.startChat()
-    If the prompt says "GoogleGenAI", the generated code MUST use "GoogleGenAI".
   }
 
   commandWhitelist {

@@ -2,8 +2,9 @@
 // PRE-EXISTING: Import necessary types and functions from siblings
 import { isAllowed } from './commandWhitelist';
 import { Logger, LogEntry } from './logger';
-import { GoogleGenAI } from '@google/genai';
-import * as path from 'path'; // Use node:path for cross-platform compatibility
+import { GoogleGenAI, Type } from '@google/genai';
+import * as path from 'path';
+import * as fs from 'node:fs/promises';
 
 // Type definitions for imported interfaces (copied for clarity to the child)
 export interface Logger { log: (entry: LogEntry) => void; }
@@ -81,100 +82,93 @@ export async function executeLeaf(leaf: GenLeaf, apiKey: string, outputDir: stri
 
     // 2. Use '@google/genai' (Google Gemini) to generate each file.
     // Initialize GoogleGenAI with the provided 'apiKey'.
-    const genAI = new GoogleGenAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    const genAI = new GoogleGenAI({ apiKey });
 
-    // Define the 'write_file' tool.
-    const write_file_tool = {
+    // Define write_file tool
+    const writeFileTool = {
         name: 'write_file',
-        description: 'Write content to a file',
+        description: 'Write content to a file. Use this tool to create each requested file.',
         parameters: {
-            type: 'object',
+            type: Type.OBJECT,
             properties: {
-                path: { type: 'string', description: 'File path (relative to leaf output directory)' },
-                content: { type: 'string', description: 'Complete file content' },
+                path: { type: Type.STRING, description: 'File path (relative to leaf output directory)' },
+                content: { type: Type.STRING, description: 'Complete file content' },
             },
             required: ['path', 'content'],
         },
     };
 
-    // Use the chat model with a 'write_file' tool.
-    const chat = model.startChat({
-        tools: [write_file_tool],
-    });
-
-    // The prompt sent to the LLM should include:
-    // - 'leaf.prompt' (the code generation instructions provided by the leaf).
-    // - A clear list of files to create (from 'leaf.files').
-    // - The instruction: "Use the write_file tool to create each file."
+    // Build the prompt with file list
     const fileList = leaf.files.map(f => `- ${f}`).join('\n');
-    const initialPrompt = `${leaf.prompt}
+    const prompt = `${leaf.prompt}
 
 Files to create:
 ${fileList}
 
-Use the write_file tool to create each file.`;
+You MUST use the write_file function to create each file. Call write_file once for each file listed above.`;
 
     const filesToGenerate = new Set(leaf.files);
     const generatedFiles = new Set<string>();
 
-    // Send the initial prompt
+    // Conversation history for multi-turn
+    const history: Array<{role: 'user' | 'model' | 'function', parts: Array<{text?: string, functionCall?: any, functionResponse?: any}>}> = [];
+
+    let attempts = 0;
+    const MAX_ATTEMPTS = 10;
+
+    // Initial request
     logger.log({
         timestamp: new Date().toISOString(),
         type: 'ai_call',
         leafPath: leaf.path,
-        details: { prompt: initialPrompt, type: 'initial_prompt' },
+        details: { prompt, type: 'initial_prompt' },
     });
 
-    let result = await chat.sendMessage(initialPrompt);
-
-    // Continue the chat until all files listed in 'leaf.files' are successfully written.
-    let attempts = 0;
-    const MAX_ATTEMPTS = 10; // Prevent infinite loops in case the model gets stuck
+    history.push({ role: 'user', parts: [{ text: prompt }] });
 
     while (generatedFiles.size < filesToGenerate.size && attempts < MAX_ATTEMPTS) {
         attempts++;
-        const response = result.response;
-        const toolCalls = response.toolCalls();
 
-        if (toolCalls && toolCalls.length > 0) {
-            const toolOutputs: any[] = [];
-            let madeProgressInThisTurn = false;
+        // Make the API call (using gemini-2.5-flash for function calling stability)
+        const response = await genAI.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: history,
+            config: { 
+                temperature: 0,
+                tools: [{ functionDeclarations: [writeFileTool] }]
+            }
+        });
 
-            for (const call of toolCalls) {
-                if (call.function.name === 'write_file') {
-                    const { path: filePath, content } = call.function.args;
+        // Check for function calls
+        if (response.functionCalls && response.functionCalls.length > 0) {
+            // Add model response to history
+            history.push({ 
+                role: 'model', 
+                parts: response.functionCalls.map(fc => ({ functionCall: { name: fc.name, args: fc.args } }))
+            });
 
-                    // Basic validation for tool arguments
+            const functionResponses: Array<{functionResponse: {name: string, response: any}}> = [];
+
+            for (const call of response.functionCalls) {
+                if (call.name === 'write_file') {
+                    const { path: filePath, content } = call.args as { path: string, content: string };
+
                     if (!filePath || typeof filePath !== 'string' || !content || typeof content !== 'string') {
-                        const errorMsg = `Invalid arguments for write_file: path=${filePath}, content=${content}`;
-                        console.error(errorMsg);
-                        toolOutputs.push({
-                            toolCode: {
-                                name: 'write_file',
-                                args: call.function.args,
-                                output: { error: errorMsg }
-                            }
+                        functionResponses.push({
+                            functionResponse: { name: 'write_file', response: { error: 'Invalid arguments' } }
                         });
                         continue;
                     }
 
-                    // The 'write_file' tool should write the content to 'outputDir/leaf.outputPath/path'.
                     const fullPath = path.join(outputDir, leaf.outputPath, filePath);
                     const dirPath = path.dirname(fullPath);
 
                     try {
-                        // Ensure the directory exists before writing the file
-                        await Bun.mkdir(dirPath, { recursive: true });
-                        await Bun.write(fullPath, content);
+                        await fs.mkdir(dirPath, { recursive: true });
+                        await fs.writeFile(fullPath, content);
 
-                        // Track generated files
-                        if (!generatedFiles.has(filePath)) {
-                            generatedFiles.add(filePath);
-                            madeProgressInThisTurn = true;
-                        }
+                        generatedFiles.add(filePath);
 
-                        // Log each file write to the 'logger'.
                         logger.log({
                             timestamp: new Date().toISOString(),
                             type: 'file_write',
@@ -182,88 +176,62 @@ Use the write_file tool to create each file.`;
                             details: { filePath, fullPath, size: content.length },
                         });
 
-                        toolOutputs.push({
-                            toolCode: {
-                                name: 'write_file',
-                                args: call.function.args,
-                                output: { status: 'success', path: fullPath, size: content.length }
-                            }
+                        functionResponses.push({
+                            functionResponse: { name: 'write_file', response: { status: 'success', path: fullPath } }
                         });
                     } catch (error: any) {
                         console.error(`Error writing file ${fullPath}:`, error);
-                        toolOutputs.push({
-                            toolCode: {
-                                name: 'write_file',
-                                args: call.function.args,
-                                output: { status: 'failed', error: error.message }
-                            }
+                        functionResponses.push({
+                            functionResponse: { name: 'write_file', response: { status: 'failed', error: error.message } }
                         });
                     }
-                } else {
-                    // Handle unexpected tool calls
-                    console.warn(`Unexpected tool call: ${call.function.name}`);
-                    toolOutputs.push({
-                        toolCode: {
-                            name: call.function.name,
-                            args: call.function.args,
-                            output: { status: 'failed', error: 'Unexpected tool call' }
-                        }
-                    });
                 }
             }
 
-            // Send tool outputs back to the model to continue the conversation
-            if (toolOutputs.length > 0) {
-                logger.log({
-                    timestamp: new Date().toISOString(),
-                    type: 'ai_call',
-                    leafPath: leaf.path,
-                    details: { type: 'tool_outputs', outputs: toolOutputs },
-                });
-                result = await chat.sendMessage(toolOutputs);
-            } else if (!madeProgressInThisTurn) {
-                // If tool calls were made but no files were written or progress was made,
-                // it might be stuck. Break to prevent an infinite loop.
-                console.warn("Model made tool calls but no progress was made in file generation.");
-                break;
-            }
+            // Add function responses to history
+            history.push({ role: 'function', parts: functionResponses });
 
         } else {
-            // If the model responds without tool calls, it might be done or stuck.
+            // No function calls - model might need prompting
             if (generatedFiles.size < filesToGenerate.size) {
-                // If not all files are generated, prompt the model again.
                 const remainingFiles = Array.from(filesToGenerate).filter(f => !generatedFiles.has(f));
-                const followUpPrompt = `Please continue generating the remaining files: ${remainingFiles.join(', ')}. Use the write_file tool.`;
+                const followUp = `Please use the write_file function to create these remaining files: ${remainingFiles.join(', ')}`;
+                
+                // Add model's text response if any
+                if (response.text) {
+                    history.push({ role: 'model', parts: [{ text: response.text }] });
+                }
+                
+                history.push({ role: 'user', parts: [{ text: followUp }] });
+                
                 logger.log({
                     timestamp: new Date().toISOString(),
                     type: 'ai_call',
                     leafPath: leaf.path,
-                    details: { prompt: followUpPrompt, type: 'follow_up_prompt' },
+                    details: { prompt: followUp, type: 'follow_up' },
                 });
-                result = await chat.sendMessage(followUpPrompt);
             } else {
-                // All files generated, and model didn't make more tool calls.
                 break;
             }
         }
     }
 
-    // Final check to ensure all files were generated
+    // Final check
     if (generatedFiles.size < filesToGenerate.size) {
         const unwrittenFiles = Array.from(filesToGenerate).filter(f => !generatedFiles.has(f));
         logger.log({
             timestamp: new Date().toISOString(),
             type: 'ai_call',
             leafPath: leaf.path,
-            details: { status: 'failed', reason: 'Not all files were generated', unwrittenFiles, attemptsMade: attempts },
+            details: { status: 'failed', reason: 'Not all files generated', unwrittenFiles, attempts },
         });
-        throw new Error(`Not all files were generated after ${attempts} attempts. Missing: ${unwrittenFiles.join(', ')}`);
+        throw new Error(`Missing files after ${attempts} attempts: ${unwrittenFiles.join(', ')}`);
     }
 
     logger.log({
         timestamp: new Date().toISOString(),
         type: 'ai_call',
         leafPath: leaf.path,
-        details: { status: 'success', message: 'All files generated successfully', attemptsMade: attempts },
+        details: { status: 'success', attempts },
     });
 }

@@ -64,8 +64,12 @@ compiler {
     
     Parsing rules:
       - "include path;" -> AidInclude (path can be local file or https URL)
+        IMPORTANT: The semicolon is the TERMINATOR, NOT part of the path.
+        Example: the statement "inc-lude foo.aid;" (without the hyphen) should produce path='foo.aid' (no semicolon in path!)
       - "name { ... }" -> AidModule (recursively parse content)
+        Module name is the identifier before the opening brace, content is recursively parsed
       - "name=value;" -> AidParam
+        The semicolon is the terminator, not part of the value
       - Everything else -> AidProse
       - Triple backtick code blocks are treated as opaque prose (don't parse inside)
   }
@@ -77,6 +81,9 @@ compiler {
     Exports:
       - Resolver class with resolve(rootFile: string, outputDir: string): Promise<string>
       - The resolve method returns the path to the resolved .aid file
+      - Re-exports parse function from parser (export { parse } from './parser')
+      - Re-exports types from parser (export type { AidNode, AidModule, ... } from './parser')
+        IMPORTANT: Use 'export type' for type re-exports to work with verbatimModuleSyntax
     
     Implementation:
       1. Read the root .aid file using Bun.file()
@@ -93,6 +100,24 @@ compiler {
     Creates gen.ts.
     
     Uses Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai).
+    
+    CRITICAL API PATTERN - use EXACTLY this code:
+    ```typescript
+    import { GoogleGenAI, Type } from '@google/genai';
+    const genai = new GoogleGenAI({ apiKey });
+    const response = await genai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { 
+        temperature: 0,
+        tools: [{ functionDeclarations: [...] }]  // tools MUST be inside config!
+      }
+    });
+    // response.functionCalls = array of {name, args} or undefined
+    // response.text = string response or undefined
+    ```
+    IMPORTANT: tools MUST be inside config object, NOT at the top level.
+    NEVER use getGenerativeModel(), model.startChat(), or @google/generative-ai patterns.
     
     Exports GenCompiler class with compile(genAidPath: string, depth?: number) method.
     Constructor takes apiKey string.
@@ -142,6 +167,19 @@ compiler {
     Creates diff.ts.
     
     Uses Google Gemini via @google/genai package (GoogleGenAI class) for semantic comparison.
+    
+    CRITICAL API PATTERN - use EXACTLY this code:
+    ```typescript
+    import { GoogleGenAI } from '@google/genai';
+    const genai = new GoogleGenAI({ apiKey });
+    const response = await genai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: { temperature: 0 }
+    });
+    const text = response.text;
+    ```
+    NEVER use getGenerativeModel(), model.startChat(), or @google/generative-ai patterns.
     
     When compiling, if we have the previous compiled .gen.aid content, we can avoid going deeper into that branch by checking whether the new .gen.aid content is for all practical purposes equivalent, with no deviations.
     If it is the same, then we can keep it and all of its children, and don't need to recurse further as we'd expect the output to be the same.
