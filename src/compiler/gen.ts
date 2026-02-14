@@ -155,32 +155,34 @@ const MAX_DEPTH = 3; // Maximum nesting depth
 /**
  * Extract top-level module names from .aid content.
  * Matches patterns like: name { ... }
- * Module names must be single words (identifiers) immediately followed by {
- * Does NOT match nested modules (those inside other braces).
+ * Module names must be single words (identifiers) at the START of a line, immediately followed by {
+ * Does NOT match inside code blocks or nested modules.
  */
 function extractTopLevelModules(content: string): string[] {
   const modules: string[] = [];
-  let depth = 0;
   
-  // Use regex to find all `identifier {` patterns, then filter by depth
-  // We need to track depth manually because regex can't do balanced matching
-  const tokens: Array<{type: 'open' | 'close' | 'ident', value?: string, pos: number}> = [];
+  // First, remove code blocks to avoid matching { } inside them
+  const withoutCodeBlocks = content.replace(/```[\s\S]*?```/g, '');
   
-  // Find all { and } and identifiers followed by optional whitespace and {
-  const identPattern = /\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\{/g;
+  // Use regex to find all `identifier {` patterns at the start of a line, then filter by depth
+  const tokens: Array<{type: 'open' | 'close', pos: number}> = [];
+  
+  // Module pattern: identifier at START of line (after optional whitespace) followed by optional whitespace and {
+  // This is more restrictive than before - must be at start of line
+  const identPattern = /^[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)\s*\{/gm;
   let match;
   
   // First pass: mark all brace positions
-  for (let i = 0; i < content.length; i++) {
-    if (content[i] === '{') {
+  for (let i = 0; i < withoutCodeBlocks.length; i++) {
+    if (withoutCodeBlocks[i] === '{') {
       tokens.push({ type: 'open', pos: i });
-    } else if (content[i] === '}') {
+    } else if (withoutCodeBlocks[i] === '}') {
       tokens.push({ type: 'close', pos: i });
     }
   }
   
   // Second pass: find identifier { patterns at depth 0
-  while ((match = identPattern.exec(content)) !== null) {
+  while ((match = identPattern.exec(withoutCodeBlocks)) !== null) {
     const identEnd = match.index + match[0].length - 1; // position of the {
     
     // Calculate depth at this position
@@ -195,7 +197,7 @@ function extractTopLevelModules(content: string): string[] {
     if (depthAtPos === 0) {
       const name = match[1];
       // Filter out common prose words that might accidentally match
-      const proseWords = ['if', 'for', 'while', 'function', 'class', 'const', 'let', 'var', 'return', 'export', 'import', 'type', 'interface', 'Each', 'The', 'This', 'When', 'From', 'For', 'If'];
+      const proseWords = ['if', 'for', 'while', 'function', 'class', 'const', 'let', 'var', 'return', 'export', 'import', 'type', 'interface', 'Each', 'The', 'This', 'When', 'From', 'For', 'If', 'name', 'path', 'of', 'module'];
       if (!proseWords.includes(name) && !modules.includes(name)) {
         modules.push(name);
       }
