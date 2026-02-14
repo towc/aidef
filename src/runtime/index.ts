@@ -376,3 +376,9 @@ CRITICAL: DO NOT DIVERGE FROM THE PROMPT INSTRUCTIONS.
     fs.appendFileSync(this.logPath, line);
   }
 }
+
+export async function run(outputDir: string, apiKey: string): Promise<void> {
+  const runtime = new AidRuntime(apiKey, outputDir);
+  await runtime.run();
+}
+
