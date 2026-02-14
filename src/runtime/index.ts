@@ -217,7 +217,10 @@ CRITICAL: DO NOT DIVERGE FROM THE PROMPT INSTRUCTIONS.
 - If the prompt shows specific API patterns, use those EXACT patterns
 - If the prompt shows interface definitions, implement them EXACTLY as shown
 - Do not substitute similar-sounding packages, classes, or method names
-- NEVER use GoogleGenerativeAI - the correct class name is GoogleGenAI`;
+- NEVER use GoogleGenerativeAI - the correct class name is GoogleGenAI
+
+IMPORTANT: When writing file content, use normal quotes. Do NOT escape single quotes as \\' or double quotes as \\".
+Write valid TypeScript/JavaScript code with proper string syntax.`;
 
     try {
       const chat = this.ai.chats.create({
