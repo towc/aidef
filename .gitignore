@@ -2,10 +2,12 @@
 node_modules
 
 # AIDef compilation artifacts
-.aid-gen/
-
-# AIDef build output
-build/
+*.gen.aid
+*.gen.aid.prev
+*.gen.aid.leaf.json
+*.gen.aid.map
+*.gen.aid.info
+runtime.log.jsonl
 
 # AIDef local config (may contain API keys)
 .aidrc
