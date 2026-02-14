@@ -68,11 +68,13 @@ export interface GenNode {
 export interface GenLeaf {
   /** Path to this leaf's JSON file */
   path: string;
-  /** Directory where this leaf's files will be written */
+  /** Directory where this leaf's JSON lives (compilation artifact) */
   dir: string;
+  /** Output path where files should be written (relative to project root, from path= param) */
+  outputPath: string;
   /** Prompt containing all context for code generation */
   prompt: string;
-  /** Files this leaf is allowed to write (relative to dir) */
+  /** Files this leaf is allowed to write (relative to outputPath) */
   files: string[];
   /** Commands to run (must be whitelisted) */
   commands: string[];
@@ -98,9 +100,11 @@ export interface GenNodeArgs {
 export interface GenLeafArgs {
   /** Name of the leaf (becomes folder name) */
   name: string;
+  /** Output path where files go (from path= param, relative to project root) */
+  outputPath: string;
   /** Detailed prompt for code generation - must include interface to implement */
   prompt: string;
-  /** Files this leaf will create (relative paths) */
+  /** Files this leaf will create (relative to outputPath) */
   files: string[];
   /** Shell commands to run (must be whitelisted) */
   commands?: string[];

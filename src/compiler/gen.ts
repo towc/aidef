@@ -197,6 +197,10 @@ export class GenCompiler {
               type: Type.STRING, 
               description: 'Exact name from the module { } block in the spec' 
             },
+            outputPath: {
+              type: Type.STRING,
+              description: 'Output path from path= param, relative to project root (e.g., "src/compiler/parser.ts"). Inherit from parent if not specified in module.'
+            },
             prompt: { 
               type: Type.STRING, 
               description: 'DETAILED code generation instructions: runtime (Bun/TS), dependencies, exports, types, behavior' 
@@ -209,10 +213,10 @@ export class GenCompiler {
             commands: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: 'Shell commands to run (npm install, bun install only)'
+              description: 'Shell commands to run (bun init, bun add, bun install only)'
             }
           },
-          required: ['name', 'prompt', 'files']
+          required: ['name', 'outputPath', 'prompt', 'files']
         }
       }
     ] : [
@@ -227,6 +231,10 @@ export class GenCompiler {
               type: Type.STRING, 
               description: 'Name of the leaf (becomes folder name)' 
             },
+            outputPath: {
+              type: Type.STRING,
+              description: 'Output path from path= param, relative to project root'
+            },
             prompt: { 
               type: Type.STRING, 
               description: 'DETAILED instructions with exact types, function signatures, behavior' 
@@ -239,10 +247,10 @@ export class GenCompiler {
             commands: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: 'Shell commands to run (npm install, bun install only)'
+              description: 'Shell commands to run (bun init, bun add, bun install only)'
             }
           },
-          required: ['name', 'prompt', 'files']
+          required: ['name', 'outputPath', 'prompt', 'files']
         }
       }
     ];
@@ -392,15 +400,20 @@ export class GenCompiler {
     args: GenLeafArgs,
     parentDir: string
   ): Promise<{ success: boolean; path?: string; error?: string }> {
-    const { name, prompt, files, commands } = args;
+    const { name, outputPath, prompt, files, commands } = args;
 
-    if (!name || !prompt || !files || files.length === 0) {
-      return { success: false, error: 'gen_leaf requires name, prompt, and files' };
+    if (!name || !outputPath || !prompt || !files || files.length === 0) {
+      return { success: false, error: 'gen_leaf requires name, outputPath, prompt, and files' };
     }
 
     // Validate name
     if (name.includes('/') || name.includes('..')) {
       return { success: false, error: 'Invalid leaf name' };
+    }
+
+    // Validate outputPath (no ..)
+    if (outputPath.includes('..')) {
+      return { success: false, error: 'Invalid outputPath' };
     }
 
     const leafDir = path.join(parentDir, name);
@@ -415,14 +428,14 @@ export class GenCompiler {
     }
     this.createdChildren.get(parentDir)!.add(name);
 
-    // Check for file collisions
+    // Check for file collisions using outputPath
     for (const file of files) {
-      const absoluteFile = path.join(leafDir, file);
+      const absoluteFile = path.join(outputPath, file);
       const existingOwner = this.fileCollisions.get(absoluteFile);
       if (existingOwner) {
         return { 
           success: false, 
-          error: `File collision: ${file} already owned by ${existingOwner}` 
+          error: `File collision: ${file} at ${outputPath} already owned by ${existingOwner}` 
         };
       }
       this.fileCollisions.set(absoluteFile, name);
@@ -431,17 +444,18 @@ export class GenCompiler {
     // Create directory
     fs.mkdirSync(leafDir, { recursive: true });
 
-    // Create leaf JSON
+    // Create leaf JSON with outputPath
     const leaf: GenLeaf = {
       path: leafPath,
       dir: leafDir,
+      outputPath,
       prompt,
       files,
       commands: commands || []
     };
 
     fs.writeFileSync(leafPath, JSON.stringify(leaf, null, 2), 'utf-8');
-    console.log(`[gen] Created leaf: ${leafPath}`);
+    console.log(`[gen] Created leaf: ${leafPath} -> ${outputPath}`);
 
     return { success: true, path: leafPath };
   }

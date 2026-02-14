@@ -13,12 +13,20 @@ compiler {
   
   Nodes are akin to typical packages/modules/functions. Leaves are closer to primitive operations, like "implement an in-memory cache with these signatures and behaviours" - instructions you could give to a junior developer with confidence the task is well-defined enough they won't mess it up.
   
-  Each leaf is a .leaf.json file containing: prompt (instructions), files (what to create), commands (shell commands to run).
-    The prompt contains all relevant instructions from the parent, including interfaces to adhere to.
+  Each leaf is a .leaf.json file containing: prompt, outputPath, files, commands.
+    prompt: instructions for code generation, including interfaces to implement.
+    outputPath: where files should be written, relative to project root (from path= inheritance).
+    files: list of files to create (just filenames, written to outputPath).
+    commands: shell commands to run (must be whitelisted).
     A lightweight process during compilation checks that no 2 leaves write to the same file.
   
-  Each node and leaf has its own folder not shared by others.
-    The parent defines clear interfaces for children, enabling parallelization and tree-diffing.
+  Path inheritance:
+    The path= param on a module sets the base output path.
+    Children inherit from parent: if compiler has path=src/compiler and parser is a child, parser's outputPath is src/compiler (and its files go there).
+    Submodules do NOT repeat the full path - they inherit from parent.
+    The root node should spawn an initial setup leaf that runs bun init to create the project structure.
+  
+  Each node and leaf has its own folder in the compilation output, but files are written to outputPath locations.
   
   Exports a compile function that takes rootFile, outputDir, and apiKey.
   First runs the resolver, then the llmCompiler.
@@ -57,12 +65,18 @@ compiler {
       - It sees the raw human spec with all its ambiguity
       - It must establish stable module boundaries matching the human's intent
       - Its structure determines how well tree diffing works downstream
+      - It should create an initial setup leaf that runs bun init to set up the project
     
     When processing any node:
-      1. Parse the .aid content
-      2. Send to LLM with system prompt explaining the format
-      3. LLM uses tools: gen_node (spawn child), gen_leaf (create leaf)
-      4. Recursively compile child nodes
+      1. Parse the .aid content to find modules and their path= params
+      2. Track the current outputPath (inherited from parent or set by path=)
+      3. Send to LLM with system prompt explaining the format
+      4. LLM uses tools: gen_node (spawn child node), gen_leaf (create leaf)
+      5. Pass outputPath to children so they know where their files go
+      6. Recursively compile child nodes
+    
+    gen_leaf tool requires: name, outputPath, prompt, files, and optionally commands.
+    gen_node tool requires: name, content, and the parent's outputPath for inheritance.
     
     Temperature=0 for deterministic output.
     

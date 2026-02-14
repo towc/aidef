@@ -107,16 +107,27 @@ export class AidRuntime {
   private async executeLeaf(leaf: GenLeaf): Promise<void> {
     console.log(`\n[runtime] Executing: ${leaf.path}`);
 
-    // Step 1: Run commands
+    // Determine output directory (relative to project root in outputDir)
+    const outputPath = leaf.outputPath 
+      ? path.join(this.outputDir, leaf.outputPath)
+      : leaf.dir;
+
+    // Ensure output directory exists
+    const outputDir = outputPath.endsWith('.ts') || outputPath.endsWith('.js')
+      ? path.dirname(outputPath)
+      : outputPath;
+    fs.mkdirSync(outputDir, { recursive: true });
+
+    // Step 1: Run commands (in output directory)
     if (leaf.commands && leaf.commands.length > 0) {
       for (const cmd of leaf.commands) {
-        await this.runCommand(cmd, leaf.dir);
+        await this.runCommand(cmd, outputDir);
       }
     }
 
-    // Step 2: Generate files
+    // Step 2: Generate files (to output directory)
     if (leaf.files && leaf.files.length > 0) {
-      await this.generateFiles(leaf);
+      await this.generateFiles(leaf, outputDir);
     }
   }
 
@@ -166,7 +177,7 @@ export class AidRuntime {
   /**
    * Generate files using LLM
    */
-  private async generateFiles(leaf: GenLeaf): Promise<void> {
+  private async generateFiles(leaf: GenLeaf, outputDir: string): Promise<void> {
     if (!this.ai) {
       console.warn('[runtime] No API key - cannot generate files');
       return;
@@ -249,7 +260,7 @@ Follow the instructions in the prompt carefully.`;
               // Allow it anyway but warn
             }
 
-            const absolutePath = path.join(leaf.dir, filePath);
+            const absolutePath = path.join(outputDir, filePath);
             
             // Ensure directory exists
             fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
