@@ -25,6 +25,8 @@ runtime {
   - When you import something, use it directly - do NOT re-export or redeclare it
   - Only declare/export things you are IMPLEMENTING in this file
   - If the prompt shows interfaces for understanding, implement them OR import them - never stub them
+  - If a function uses "await", it MUST be declared with "async"
+  - If a function returns Promise, it MUST be declared with "async"
 
   leafExecutor {
     Executes a single leaf node using Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai or GoogleGenerativeAI).
