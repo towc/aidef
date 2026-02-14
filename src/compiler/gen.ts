@@ -69,9 +69,12 @@ Your leaf prompt should be CONCRETE:
 When the spec contains SPECIFIC details (package names, API patterns, function signatures, code blocks), you MUST preserve them EXACTLY in child prompts. Do NOT substitute similar alternatives.
 
 - If spec says "@google/genai" -> use "@google/genai", NOT "@google/generative-ai"
+- If spec shows "GoogleGenAI" -> use "GoogleGenAI", NEVER "GoogleGenerativeAI"
+- The class name is GoogleGenAI (two capital letters: GenAI), NOT GoogleGenerativeAI
 - If spec shows \`new GoogleGenAI({ apiKey })\` -> use that exact pattern
 - If spec shows \`ai.chats.create\` -> use that, NOT \`getGenerativeModel\`
 - Code blocks in the spec are AUTHORITATIVE - copy them verbatim into leaf prompts
+- WRONG: GoogleGenerativeAI, CORRECT: GoogleGenAI
 
 You are passing instructions DOWN the tree. Children cannot see the original spec - they only see what you give them. If you change or omit details, they are lost forever.
 
