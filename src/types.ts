@@ -72,6 +72,8 @@ export interface GenLeaf {
   dir: string;
   /** Output path where files should be written (relative to project root, from path= param) */
   outputPath: string;
+  /** Path to the original human .aid file this leaf came from (for generated file headers) */
+  sourceAid: string;
   /** Prompt containing all context for code generation */
   prompt: string;
   /** Files this leaf is allowed to write (relative to outputPath) */
@@ -102,6 +104,8 @@ export interface GenLeafArgs {
   name: string;
   /** Output path where files go (from path= param, relative to project root) */
   outputPath: string;
+  /** Path to the original human .aid file (for generated file headers) */
+  sourceAid: string;
   /** Detailed prompt for code generation - must include interface to implement */
   prompt: string;
   /** Files this leaf will create (relative to outputPath) */

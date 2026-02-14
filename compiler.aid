@@ -13,11 +13,12 @@ compiler {
   
   Nodes are akin to typical packages/modules/functions. Leaves are closer to primitive operations, like "implement an in-memory cache with these signatures and behaviours" - instructions you could give to a junior developer with confidence the task is well-defined enough they won't mess it up.
   
-  Each leaf is a .leaf.json file containing: prompt, outputPath, files, commands.
+  Each leaf is a .leaf.json file containing: prompt, outputPath, files, commands, sourceAid.
     prompt: instructions for code generation, including interfaces to implement.
     outputPath: where files should be written, relative to project root (from path= inheritance).
     files: list of files to create (just filenames, written to outputPath).
     commands: shell commands to run (must be whitelisted).
+    sourceAid: path to the original human .aid file this leaf came from (for generated file headers).
     A lightweight process during compilation checks that no 2 leaves write to the same file.
   
   Path inheritance:

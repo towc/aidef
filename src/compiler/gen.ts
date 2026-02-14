@@ -199,7 +199,11 @@ export class GenCompiler {
             },
             outputPath: {
               type: Type.STRING,
-              description: 'Output path from path= param, relative to project root (e.g., "src/compiler/parser.ts"). Inherit from parent if not specified in module.'
+              description: 'Output path from path= param, relative to project root (e.g., "src/compiler"). Inherit from parent if not specified in module.'
+            },
+            sourceAid: {
+              type: Type.STRING,
+              description: 'Path to the original human .aid file (e.g., "compiler.aid")'
             },
             prompt: { 
               type: Type.STRING, 
@@ -216,7 +220,7 @@ export class GenCompiler {
               description: 'Shell commands to run (bun init, bun add, bun install only)'
             }
           },
-          required: ['name', 'outputPath', 'prompt', 'files']
+          required: ['name', 'outputPath', 'sourceAid', 'prompt', 'files']
         }
       }
     ] : [
@@ -235,6 +239,10 @@ export class GenCompiler {
               type: Type.STRING,
               description: 'Output path from path= param, relative to project root'
             },
+            sourceAid: {
+              type: Type.STRING,
+              description: 'Path to the original human .aid file'
+            },
             prompt: { 
               type: Type.STRING, 
               description: 'DETAILED instructions with exact types, function signatures, behavior' 
@@ -250,7 +258,7 @@ export class GenCompiler {
               description: 'Shell commands to run (bun init, bun add, bun install only)'
             }
           },
-          required: ['name', 'outputPath', 'prompt', 'files']
+          required: ['name', 'outputPath', 'sourceAid', 'prompt', 'files']
         }
       }
     ];
@@ -400,10 +408,10 @@ export class GenCompiler {
     args: GenLeafArgs,
     parentDir: string
   ): Promise<{ success: boolean; path?: string; error?: string }> {
-    const { name, outputPath, prompt, files, commands } = args;
+    const { name, outputPath, sourceAid, prompt, files, commands } = args;
 
-    if (!name || !outputPath || !prompt || !files || files.length === 0) {
-      return { success: false, error: 'gen_leaf requires name, outputPath, prompt, and files' };
+    if (!name || !outputPath || !sourceAid || !prompt || !files || files.length === 0) {
+      return { success: false, error: 'gen_leaf requires name, outputPath, sourceAid, prompt, and files' };
     }
 
     // Validate name
@@ -444,11 +452,12 @@ export class GenCompiler {
     // Create directory
     fs.mkdirSync(leafDir, { recursive: true });
 
-    // Create leaf JSON with outputPath
+    // Create leaf JSON with outputPath and sourceAid
     const leaf: GenLeaf = {
       path: leafPath,
       dir: leafDir,
       outputPath,
+      sourceAid,
       prompt,
       files,
       commands: commands || []
