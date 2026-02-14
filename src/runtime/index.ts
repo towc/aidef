@@ -210,7 +210,12 @@ You MUST create these files (using ONLY the filename, not paths): ${leaf.files.j
 
 Use the write_file tool for each file. Create complete, working code.
 The write_file tool's "path" parameter should be JUST the filename (e.g., "index.ts", NOT "src/index.ts").
-Follow the instructions in the prompt carefully.`;
+
+CRITICAL: DO NOT DIVERGE FROM THE PROMPT INSTRUCTIONS.
+- If the prompt says to use "@google/genai", use EXACTLY "@google/genai", not "@google/generative-ai"
+- If the prompt shows specific API patterns, use those EXACT patterns
+- If the prompt shows interface definitions, implement them EXACTLY as shown
+- Do not substitute similar-sounding packages, classes, or method names`;
 
     try {
       const chat = this.ai.chats.create({
