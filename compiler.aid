@@ -46,8 +46,10 @@ compiler {
   Creates index.ts which exports a compile function taking rootFile, outputDir, and apiKey.
   
   The compile function:
-    1. Creates a Resolver and calls resolve(rootFile, outputDir) to get the resolved .aid path
-    2. Creates a GenCompiler with apiKey and calls compile(resolvedAidPath)
+    1. Creates a compile logger via createCompileLogger(outputDir)
+    2. Creates a Resolver and calls resolve(rootFile, outputDir) to get the resolved .aid path
+    3. Creates a GenCompiler with apiKey and logger, calls compile(resolvedAidPath)
+    4. Closes the logger when done (even on error, use try/finally)
 
   parser {
     Deterministic parser for .aid syntax. No LLM involved.
@@ -120,22 +122,51 @@ compiler {
     NEVER use getGenerativeModel(), model.startChat(), or @google/generative-ai patterns.
     
     Exports GenCompiler class with compile(genAidPath: string, depth?: number) method.
-    Constructor takes apiKey string.
+    Constructor takes apiKey string and optional logger (from ./logger).
+    If logger is provided, log all pass results, tool calls, and validation events.
     
-    The compile method:
+    Multi-Pass Compilation:
+      The compile method uses THREE PASSES to ensure reliable child generation:
+      
+      PASS 1 - Planning:
+        Ask the LLM to analyze the .aid content and produce a structured plan.
+        The plan should identify:
+          - What modules are DIRECTLY nested (not deeply nested)
+          - For each module: is it a node (needs further decomposition) or a leaf (small enough for zero-shot)?
+          - What interfaces need to be defined for children to implement
+        Output: A text plan listing expected children with their types (node vs leaf).
+      
+      PASS 2 - Interface Definition:
+        Based on the plan, ask the LLM to define CONCRETE TypeScript interfaces.
+        For each planned child, generate:
+          - Full interface definitions (not just import statements)
+          - Clear contracts that children must implement
+          - Any shared types needed across children
+        Output: A text block with all interface definitions.
+      
+      PASS 3 - Child Generation:
+        Now ask the LLM to generate children using tool calls (gen_node, gen_leaf).
+        The prompt includes the plan and interfaces from passes 1-2.
+        After receiving tool calls, VALIDATE against the plan:
+          - If a planned child is missing: log "MISSING CHILD: <name>" and retry
+          - If a duplicate is created: log "DUPLICATE CHILD: <name>" and skip
+          - If an unexpected child appears: log "UNEXPECTED CHILD: <name>" and skip
+        Retry up to 3 times if validation fails.
+    
+    The compile method overall:
       1. Reads the .gen.aid file content
       2. If previous content exists, use LLM to judge semantic equivalence (via TreeDiffer)
          If equivalent, skip this entire subtree - keep existing children
          If different, continue to step 3
-      3. Process with LLM to spawn children (gen_node and gen_leaf tools)
+      3. Execute the three-pass compilation (Planning → Interfaces → Generation)
       4. For each child spawned, recurse - the child's new spec will be compared to its previous content
       5. Save content for future diffing
     
-    LLM tools:
+    LLM tools (used in Pass 3):
       - gen_node: { name: string, content: string } - creates child directory with node.gen.aid
       - gen_leaf: { name: string, outputPath: string, sourceAid: string, prompt: string, files: string[], commands?: string[] }
     
-    The system prompt is CRITICAL. It must instruct the LLM to:
+    The system prompts are CRITICAL. They must instruct the LLM to:
       - Act as an architect that decomposes specs into nodes/leaves
       - TRANSFORM abstract human prose into CONCRETE TypeScript interfaces
         Human .aid files should NOT need to specify exact function signatures.
@@ -156,10 +187,35 @@ compiler {
         Children cannot see the original spec - they only see what the parent passes.
         If you change or omit details, they are lost forever.
     
-    Handle tool calls in a loop until no more function calls.
     Use temperature=0 for deterministic output.
     Track created children per directory to prevent duplicates.
     Track file collisions across leaves.
+  }
+
+  logger {
+    Compile-time logging for debugging and analysis.
+    Creates logger.ts.
+    
+    Stores all AI calls, pass results, and child generation events in compile.log.jsonl.
+    Each line is a JSON object with timestamp, type, nodePath, and details.
+    Used by analyse mode to review what happened during compilation.
+    
+    Log entry types:
+      - 'pass1_plan': The planning pass output (expected children list)
+      - 'pass2_interfaces': The interface definitions generated
+      - 'pass3_start': Beginning of child generation pass
+      - 'tool_call': Each gen_node or gen_leaf tool call received
+      - 'validation_error': Missing/duplicate/unexpected child detected
+      - 'retry': Retrying child generation due to validation failure
+      - 'semantic_diff': Result of semantic equivalence check (skipped or recompiling)
+      - 'node_complete': Node finished processing
+      - 'error': Any errors encountered
+    
+    Exports:
+      - CompileLogEntry interface with: timestamp, type, nodePath, details (any)
+      - createCompileLogger(outputDir: string) function returning a logger object
+      - Logger object has: log(type, nodePath, details), close() methods
+      - Writes to outputDir/compile.log.jsonl
   }
 
   diff {
