@@ -16,8 +16,12 @@ runtime {
     JSON files get no header since JSON doesn't support comments.
     The source.aid path comes from the leaf's sourceAid field.
   
-  Exports a run function that takes outputDir and apiKey.
+  Creates index.ts which exports a run function that takes outputDir and apiKey.
   Finds all leaf.json files, executes them in parallel with progress reporting.
+  
+  IMPORTANT for index.ts: Import symbols from sibling modules (leafExecutor, commandWhitelist, logger).
+  Do NOT redeclare those imported types/functions - just use them directly.
+  Only DEFINE types/interfaces that are NEW to this module.
 
   leafExecutor {
     Executes a single leaf node using Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai or GoogleGenerativeAI).
@@ -94,7 +98,9 @@ runtime {
     ```
     
     Implementation:
-      - createLogger returns a Logger that appends to the given file path
+      - createLogger MUST ensure parent directory of logFilePath exists before writing
+      - Use fs.mkdirSync(dirname(logFilePath), { recursive: true }) from 'node:fs' and 'node:path'
+      - Then use Bun.write(filePath, logLine, { append: true }) for appending
       - log() adds timestamp and writes JSON line to the file
   }
 }

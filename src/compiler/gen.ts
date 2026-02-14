@@ -146,6 +146,43 @@ The prompt MUST include:
 - PRE-EXISTING sibling imports if needed
 - TypeScript syntax rules (especially: use backticks for multi-line strings, NEVER single/double quotes)
 
+## CRITICAL: DO NOT REDECLARE IMPORTS
+
+When telling the child to import something, do NOT also declare a stub class/interface for it.
+
+WRONG (creates conflict):
+  "import { Resolver } from './resolver';
+   
+   export class Resolver { ... }  // NO! This shadows the import!"
+
+CORRECT (just import and use):
+  "import { Resolver } from './resolver';
+   
+   // Use Resolver directly, don't redeclare it
+   const resolver = new Resolver();"
+
+The child should ONLY declare things it is IMPLEMENTING, not things it is IMPORTING.
+
+## CRITICAL: NO AMBIENT DECLARATIONS
+
+NEVER include ambient declarations (function signatures without bodies, const declarations without values).
+These are for .d.ts type definition files, NOT implementation files.
+
+WRONG (ambient declarations cause errors):
+  "import { DEFAULT_WHITELIST, isAllowed } from './commandWhitelist';
+   
+   export const DEFAULT_WHITELIST: string[];  // ERROR: must be initialized!
+   export function isAllowed(command: string): boolean;  // ERROR: missing body!"
+
+CORRECT (only use imports, no redeclaration):
+  "import { DEFAULT_WHITELIST, isAllowed } from './commandWhitelist';
+   
+   // Just use them directly, they are already imported
+   if (isAllowed(cmd, DEFAULT_WHITELIST)) { ... }"
+
+When you IMPORT something, you already have access to it. Do NOT add export declarations for imported items.
+The Type definitions section should describe interfaces FOR THE CHILD TO UNDERSTAND, not generate as code.
+
 IMPORTANT: The prompt should NOT mention full paths like "Create src/compiler/index.ts".
 The outputPath already specifies where files go. Just describe what the file should contain.
 Example: Instead of "Create src/compiler/index.ts which exports...", say "Create index.ts which exports..."

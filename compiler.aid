@@ -50,6 +50,10 @@ compiler {
     2. Creates a Resolver and calls resolve(rootFile, outputDir) to get the resolved .aid path
     3. Creates a GenCompiler with apiKey and logger, calls compile(resolvedAidPath)
     4. Closes the logger when done (even on error, use try/finally)
+  
+  IMPORTANT for index.ts: Import symbols from sibling modules (parser, resolver, gen, logger, diff).
+  Do NOT redeclare those imported types/functions - just use them directly.
+  Only DEFINE types/interfaces that are NEW to this module.
 
   parser {
     Deterministic parser for .aid syntax. No LLM involved.
@@ -147,11 +151,20 @@ compiler {
       PASS 3 - Child Generation:
         Now ask the LLM to generate children using tool calls (gen_node, gen_leaf).
         The prompt includes the plan and interfaces from passes 1-2.
-        After receiving tool calls, VALIDATE against the plan:
-          - If a planned child is missing: log "MISSING CHILD: <name>" and retry
+        
+        IMPORTANT: Before calling the LLM, DETERMINISTICALLY extract expected modules from the .aid content.
+        Use a function extractTopLevelModules(content: string): string[] that finds all `name { }` blocks
+        at the TOP LEVEL of the content (not nested inside other blocks). This is done by:
+        1. Remove code blocks (```...```) to avoid false positives
+        2. Find patterns matching `^\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{` at the START of lines
+        3. Track brace depth - only include modules where the opening brace is at depth 0
+        4. Filter out common prose words (if, for, while, function, class, etc.)
+        
+        After receiving tool calls from the LLM, VALIDATE against these expected modules:
+          - If an expected module is missing: log "MISSING CHILD: <name>" and retry
           - If a duplicate is created: log "DUPLICATE CHILD: <name>" and skip
-          - If an unexpected child appears: log "UNEXPECTED CHILD: <name>" and skip
-        Retry up to 3 times if validation fails.
+          - If a child doesn't match any expected module: allow it (might be an index entry point)
+        Retry up to 3 times if any expected modules are missing.
     
     The compile method overall:
       1. Reads the .gen.aid file content
@@ -229,7 +242,9 @@ compiler {
     ```
     
     Implementation:
-      - createCompileLogger opens outputDir/compile.log.jsonl for appending
+      - createCompileLogger MUST ensure outputDir exists before opening file (use mkdir -p equivalent)
+      - Use fs.mkdirSync(outputDir, { recursive: true }) from 'node:fs' to create directory
+      - Then open outputDir/compile.log.jsonl for appending using Bun.file().writer()
       - log() writes a JSON line with timestamp, type, nodePath, details
       - close() flushes and closes the file
   }

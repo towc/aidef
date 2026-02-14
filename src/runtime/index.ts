@@ -244,7 +244,15 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
 
 3. **Import syntax**: Use 'import type' for type-only imports when using verbatimModuleSyntax.
 
-4. **Bun APIs**: Use Bun.file() for file operations, Bun.spawn() for processes.`;
+4. **Bun APIs**: Use Bun.file() for file operations, Bun.spawn() for processes.
+
+5. **DO NOT redeclare imports**: If you import something, don't also declare a stub for it.
+   WRONG: import { Foo } from './foo'; export class Foo { }  // Conflict!
+   CORRECT: import { Foo } from './foo'; // Just use Foo, don't redeclare
+
+6. **Apostrophes in strings**: Use escaped apostrophe or double quotes for strings containing apostrophes.
+   WRONG: 'node's content'  // Syntax error
+   CORRECT: "node's content" or 'node\\'s content' or \`node's content\``;
 
     try {
       // CORRECT API PATTERN: use models.generateContent with conversation history
@@ -273,7 +281,29 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
 
         const functionCalls = response.functionCalls;
         if (!functionCalls || functionCalls.length === 0) {
-          break;
+          // Check if there are files still needed
+          const missingFiles = leaf.files.filter(f => !writtenFiles.has(f));
+          if (missingFiles.length === 0) {
+            break; // All done
+          }
+          
+          // LLM returned text instead of function calls - prompt it again
+          if (response.text) {
+            history.push({ role: 'model', parts: [{ text: response.text }] });
+          }
+          
+          const nudge = `You MUST use the write_file tool to create these files: ${missingFiles.join(', ')}. Please call write_file now.`;
+          history.push({ role: 'user', parts: [{ text: nudge }] });
+          
+          response = await this.ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: history,
+            config: {
+              temperature: 0,
+              tools: [{ functionDeclarations: tools }]
+            }
+          });
+          continue;
         }
 
         // Add model response to history
