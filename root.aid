@@ -1,63 +1,51 @@
-aidef is a new high-level programming language that allows developers to write the source code (.aid files) of a project for an AI to build;
+aidef is a high-level programming language that compiles .aid specification files into code via AI.
 
-The point of a programming language is to translate human thoughts into unambiguous instructions.
-  The more high-level a language is, the easier it is for the user, typically, but not if it's at the cost of not being able to specify details, think about how e.g. javascript still has bitwise operators and some low-level tooling, despite being a high-level language, and that's one of the reasons it's so popular.
-  Aidef is no different. It's the next step above transpilation: transistors <- cpu instructions <- machine code <- assembly <- low-level language <- interpreters <- high-level language <- transpilers.
-  The aidef build tool is a transpiler from .aid files into other high- or low- level languages that have deterministic runners (e.g. typescript or python or rust or c or any combination of commonly used languages), but we do this carefully and cleverly to minimize AI inference costs and build times;
+.aid files use an nginx-like syntax with prose. This file (root.aid) is the specification for aidef itself.
 
-.aid files have a parseable syntax resembling nginx configuration, except it allows for prose;
-This is the root.aid file for the aidef project, it is a good example of how .aid files look like;
+target=typescript/bun;
 
-typescript/bun;
+Top-level module interfaces (how they connect):
 
-The core of the aidef is to have a pipeline to take these .aid files into an actionable highly parallelizable plan. We call this plan generation "compilation";
+```ts
+// src/compiler/index.ts exports:
+export async function compile(rootFile: string, outputDir: string, apiKey: string): Promise<void>;
+
+// src/runtime/index.ts exports:
+export async function run(outputDir: string, apiKey: string): Promise<void>;
+
+// src/index.ts (CLI entry point):
+import { compile } from "./compiler";
+import { run } from "./runtime";
+```
 
 include compiler.aid;
-
-Once everything is compiled, the developer has the option to inspect the plan and make adjustments to the human .aid files and re-compiling, before executing the plan with the runtime.
-
 include runtime.aid;
 
 environment {
-  GEMINI_API_KEY: Required for LLM compilation and runtime;
+  GEMINI_API_KEY: Required. Used by compiler and runtime for LLM calls.
 }
 
 cli {
-  path=src/cli;
-  Entry point for the aidef tool. Uses commander or similar for arg parsing.
+  path=src/index.ts;
+  
+  Entry point for the aidef tool.
+  Uses commander for arg parsing.
+  
+  ```ts
+  import { compile } from "./compiler";
+  import { run } from "./runtime";
+  ```
+  
+  Commands:
+    compile [file] - Calls compile(file || "root.aid", outputDir, apiKey)
+                     Default outputDir is /tmp/aidef-<n> where n is next available.
+    run            - Requires --output. Calls run(outputDir, apiKey).
+    analyse        - Requires --output. Not yet implemented.
+    browse         - Requires --output. Not yet implemented.
 
-  commands {
-    compile {
-      Usage: aidef compile [file];
-      Runs the resolver then compiler on the given .aid file (default: root.aid);
-      Outputs to the directory specified by --output;
-    }
-
-    run {
-      Usage: aidef run --output <dir>;
-      Executes the runtime on a previously compiled plan;
-      Requires --output to specify which compilation output to run;
-    }
-
-    analyse {
-      Usage: aidef analyse --output <dir>;
-      Looks at the compiled plan, the AI call logs from compilation (and runtime if already executed);
-      Determines the flow of instructions via parseable .gen.aid.map files (similar to javascript source maps);
-      Identifies miscommunication between parent and child, or slow paths that could be faster with hints;
-      Records findings in .gen.aid.info files and suggests amendments to human .aid files;
-    }
-
-    browse {
-      Usage: aidef browse --output <dir>;
-      A TUI tool to inspect the plan files and analysis output;
-      Options to automatically (or manually) implement suggested changes;
-    }
-  }
-
-  options {
-    --output: Output directory for compilation artifacts. Default: /tmp/aidef-<n> where n is the next available number;
-    --max-parallel: Maximum parallel LLM calls during compilation and runtime. Default: 10;
-    --max-retries: Maximum retries for failed LLM calls. Default: 3;
-    --max-depth: Maximum node depth during compilation. Default: 5;
-  }
+  Options:
+    --output, -o <dir>  Output directory for compilation artifacts.
+    --max-parallel <n>  Max parallel LLM calls. Default 10.
+    --max-retries <n>   Max retries per LLM call. Default 3.
+    --max-depth <n>     Max node depth. Default 5.
 }

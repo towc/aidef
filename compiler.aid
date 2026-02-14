@@ -1,122 +1,105 @@
 compiler {
-  processes .aid files into the project directory structure;
+  path=src/compiler;
+  
+  Compiles .aid files into an execution plan (.gen.aid tree with .leaf.json leaves).
 
-  The compiled tree consists of .gen.aid nodes and .gen.aid.leaf.json leaves;
-  The folder structure mirrors the module structure directly in the project root, e.g. ./server/api/node.gen.aid;
-
-  Concepts (not modules, just terminology):
-
-  Nodes are responsible for generating interfaces, and planning work to be done in parallel by children it spawns.
-    We generate interfaces first so that the work can be in parallel, that's the core of the tool.
-    Nodes can spawn other nodes with the `gen_node` tool, with this heavily encapsulated and parallelizable context thanks to the interfaces, until eventually they use the `gen_leaf` tool when the task is small enough that we're confident it can be zero-shot by an AI (but we do allow multi-shot and continues retries up until `max_retries` is reached, which can also be set by the parent, but can't be above what the user config has, nor above what the parent's `max_retries` is).
-
-  Nodes are akin to typical packages/modules/functions, and leaves are closer to primitive operations, like "implement an in-memory cache layer with these signatures and these behaviours", instructions you would be able to give to a junior developer with the confidence that the task is well-defined enough they won't mess it up, but without having to be so specific that you're writing the code yourself;
-
-  The leaf nodes are .gen.aid.leaf.json files that can be collected by the runtime, and each one contains a specific format: prompt: string, files: string[], commands: string[].
-    Prompt contains all the relevant instructions from the parent, mainly the relevant interfaces to adhere to (not stored elsewhere, completely encapsulated within the prompt) and what needs to be implemented where.
-    Nodes also have the prompt and files, except the nodes' prompt is itself .aid text, and we should inject a system prompt explaining how to parse it.
-    Files contains the list of files that this leaf can write to, and is provided by the parent.
-    Commands contains shell commands the leaf needs to run (e.g. `npm init`, `npm install`), which must be in the whitelist (see runtime.aid).
-    A lightweight process during compilation should check that no 2 leaves can write to the same file;
-
-  Each node and leaf has its own folder that is not shared by any other nodes/leaves.
-    This is possible because the parent needs to implement a clear interface for the children, and that parent can spawn a leaf to import from the other children, as decided by the interface (no runtime reading of other files).
-    It's important to do it this way to minimize drift from the original developer plans, ensure good parallelization, and the tree-diffing feature;
+  This module has 4 submodules: parser, resolver, llmCompiler, treeDiff.
+  The entry point (index.ts) imports from these and exports compile().
 
   parser {
-    path=src/compiler/parser;
-    Parses .aid syntax into an AST. This is deterministic, no LLM involved.
-    Used by both resolver and compiler phases.
+    path=src/compiler/parser.ts;
+    
+    Deterministic parser for .aid syntax. No LLM involved.
 
-    Syntax to handle:
+    ```ts
+    export type AidNode = AidModule | AidParam | AidInclude | AidProse;
+    export interface AidModule { type: "module"; name: string; content: AidNode[]; }
+    export interface AidParam { type: "param"; name: string; value: string; }
+    export interface AidInclude { type: "include"; path: string; }
+    export interface AidProse { type: "prose"; text: string; }
+    
+    export function parse(content: string): AidNode[];
+    export function stringify(nodes: AidNode[]): string;
+    ```
 
-    `include <path>;` statements, where the path can be a local .aid file, or an https:// link.
-      This essentially involves taking what's in that path, and replacing this line with the entirety of that file content.
-      For .aid files, process recursively.
-      For non-.aid files (like .md), escape any `#` characters that could be mistaken for comments (e.g. markdown headers), and encapsulate appropriately as prose.
-      include is for humans, if we see this in a .gen.aid file, we ignore it and mark as a compile-time warning.
-
-    `<module> { <instructions> }` blocks define named modules.
-      The parent should be aware of all modules and keep them in its plans.
-      If the compiler doesn't spawn a node for a declared module, emit a compile-time warning.
-
-    `<param>=<value>;` define parameters.
-      Special params: `type=leaf;` forces leaf generation, `path=some_path;` overrides output path, `files=file1,file2;` declares files for leaves.
-      Unknown params are warnings (for future plugin support).
-
-    `#` for comments, everything after `#` on a line is ignored (except when escaped as `\#`);
+    Syntax rules:
+      - `include path;` - include directive
+      - `name { content }` - module block  
+      - `name=value;` - parameter
+      - Everything else is prose
+      - Code blocks (triple backticks) are treated as opaque prose, not parsed
   }
 
   resolver {
-    path=src/compiler/resolver;
-    Deterministic pre-processing of human-written .aid files. No LLM involved.
+    path=src/compiler/resolver.ts;
 
-    If no --path is passed, starts with root.aid;
-    Our tool never modifies human-written files, they are the source code;
+    Deterministic pre-processing. Resolves all includes into a single .gen.aid file.
 
-    This phase:
-      1. Reads root.aid
-      2. Recursively resolves all `include` statements
-      3. Escapes `#` in non-.aid includes (e.g., markdown)
-      4. Outputs resolved content to the output directory
+    ```ts
+    import { parse, stringify, AidNode } from "./parser";
+    
+    export async function resolve(rootFile: string, outputDir: string): Promise<string>;
+    ```
 
-    The output is then processed by the compiler phase.
+    Process:
+      1. Read rootFile
+      2. Parse with parser
+      3. For each include node:
+         - If .aid file: recursively resolve and inline
+         - If other file (e.g. .md): read content, wrap as prose
+         - If https URL: fetch and process same as above
+      4. Write resolved content to outputDir/node.gen.aid
+      5. Return the output path
   }
 
-  compiler {
-    path=src/compiler/compiler;
-    LLM-powered compilation of .aid content into nodes and leaves.
+  llmCompiler {
+    path=src/compiler/llmCompiler.ts;
 
-    Every node is a planner for its subtree. The root node (processing resolved content) takes extra care:
-      - It sees the raw human spec with all its ambiguity
-      - It must establish stable module boundaries matching the human's intent
-      - Its structure determines how well tree diffing works downstream
-      - It should identify top-level modules from the human's `module { }` blocks
-      - It defines interfaces between those modules
+    LLM-powered compilation of resolved .aid into execution plan.
 
-    When processing any node:
-      1. Parse the .aid content
-      2. Send to LLM with system prompt explaining the format
-      3. LLM uses tools: gen_node (spawn child node), gen_leaf (create leaf)
-      4. Recursively compile any child nodes
-      5. Apply tree diffing to skip unchanged branches
+    ```ts
+    import { parse, AidNode, AidModule } from "./parser";
+    import { GoogleGenAI } from "@google/genai";
+    
+    export async function compileNode(genAidPath: string, apiKey: string, depth?: number): Promise<void>;
+    ```
 
-    All nodes run at temperature=0 for deterministic output.
+    Uses Gemini API with function calling. Provides two tools:
+      - gen_node(name, content): Create child node for complex modules, recurse
+      - gen_leaf(name, prompt, files, commands): Create leaf.json for simple modules
 
-    Encapsulation rules:
-      Each node MUST fully encapsulate its children's context.
-      When spawning a child with gen_node, the parent provides:
-        - A complete .aid specification for that child's responsibility
-        - The interface the child must implement (files, exports)
-        - Interfaces of siblings the child can import from
+    Key behaviors:
+      - Temperature=0 for deterministic output
+      - Max depth (default 3) before forcing leaves
+      - Each node acts as architect, passing relevant sibling context to children
+  }
 
-      The child receives ONLY what the parent explicitly passes.
-      The child cannot read parent's .aid content or sibling .gen.aid files.
-      This isolation enables parallel compilation and stable tree diffing.
+  treeDiff {
+    path=src/compiler/treeDiff.ts;
 
-    Tree diffing strategy:
-      Goal: if a developer changes one line in root.aid, only the affected branches recompile.
+    Caching via content hashing to skip unchanged subtrees.
 
-      Diffing happens at module boundaries, not at the root level.
-      When parent node changes, we compare each child's specification individually:
-        1. Extract the content that would be passed to each gen_node call
-        2. Hash this content (normalized: trimmed, comments removed)
-        3. Compare to the hash stored in the child's existing .gen.aid
-        4. If unchanged, skip that entire subtree
-        5. If changed, prune and recompile only that subtree
+    ```ts
+    export function hashContent(content: string): string;
+    export function loadPreviousHash(genAidPath: string): string | null;
+    export function saveHash(genAidPath: string, hash: string): void;
+    export function pruneBranch(dir: string): void;
+    ```
+  }
 
-      For this to work, gen_node calls must be stable across compilations:
-        - Same module names
-        - Same interface boundaries
-        - Deterministic structure (temperature=0)
+  index {
+    path=src/compiler/index.ts;
 
-      When pruning a branch:
-        - Delete .gen.aid, .gen.aid.prev, .leaf.json files
-        - Delete only files listed in leaf nodes' `files` arrays
-        - Preserve user files like .env, local config
+    Entry point that ties the submodules together.
 
-      The root must define stable module boundaries matching the human .aid structure.
-      Example: if root.aid has `compiler { }` and `runtime { }`, the root node spawns exactly two children with those names.
-      A change inside `compiler { }` should not affect the `runtime` subtree.
+    ```ts
+    import { resolve } from "./resolver";
+    import { compileNode } from "./llmCompiler";
+
+    export async function compile(rootFile: string, outputDir: string, apiKey: string): Promise<void> {
+      const genAidPath = await resolve(rootFile, outputDir);
+      await compileNode(genAidPath, apiKey);
+    }
+    ```
   }
 }

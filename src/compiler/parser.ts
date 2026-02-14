@@ -59,6 +59,25 @@ export class AidParser {
         continue;
       }
 
+      // Code block - treat as opaque prose, don't parse inside
+      if (trimmed.startsWith('```')) {
+        // Find closing ```
+        const closeIdx = this.findCodeBlockEnd(lines, i + 1);
+        if (closeIdx < 0) {
+          // Unclosed code block - treat rest as prose
+          for (let j = i; j < end; j++) {
+            proseBuffer.push(lines[j]);
+          }
+          break;
+        }
+        // Include the entire code block as prose
+        for (let j = i; j <= closeIdx; j++) {
+          proseBuffer.push(lines[j]);
+        }
+        i = closeIdx + 1;
+        continue;
+      }
+
       // Comment - skip entirely
       if (trimmed.startsWith('#')) {
         i++;
@@ -155,6 +174,18 @@ export class AidParser {
   }
 
   /**
+   * Find the line index of the closing ``` for a code block
+   */
+  private findCodeBlockEnd(lines: string[], start: number): number {
+    for (let i = start; i < lines.length; i++) {
+      if (lines[i].trim().startsWith('```')) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /**
    * Find the line index of the closing brace matching an opening brace
    */
   private findClosingBrace(lines: string[], start: number): number {
@@ -165,6 +196,13 @@ export class AidParser {
       
       // Skip comments
       if (trimmed.startsWith('#')) continue;
+
+      // Skip code blocks entirely
+      if (trimmed.startsWith('```')) {
+        i = this.findCodeBlockEnd(lines, i + 1);
+        if (i < 0) return -1; // Unclosed code block
+        continue;
+      }
       
       // Count braces
       for (const char of trimmed) {

@@ -17,53 +17,60 @@ import { GenNodeArgs, GenLeafArgs, GenLeaf } from '../types';
 import { TreeDiffer } from './diff';
 
 /** System prompt explaining how to process .aid specs */
-const SYSTEM_PROMPT = `You are the AIDef compiler. You process .aid specifications and create LEAF NODES that generate actual code.
+const SYSTEM_PROMPT = `You are an AIDef compiler node. You act as an ARCHITECT for your subtree.
 
-## CRITICAL RULES
+## YOUR ROLE
 
-1. **PREFER gen_leaf over gen_node** - Only use gen_node for truly complex modules that have 3+ distinct subcomponents
-2. **NO INFINITE RECURSION** - Never create a child node with the same or similar name as its parent
-3. **DEPTH LIMIT** - After 2-3 levels of nodes, you MUST create leaves
-4. **ATOMIC TASKS** - Each leaf should be a specific, implementable task
+You receive a .aid specification and spawn children (nodes or leaves) to implement it.
+You are NOT implementing code yourself - you are PLANNING and DELEGATING.
 
-## Tools
+## .aid SYNTAX
 
-### gen_leaf (PREFERRED)
-Create a leaf that generates actual code files. Use this for:
-- Single modules/files with clear interfaces
-- Utility functions
-- Type definitions
-- Any task a developer could implement in 1-2 hours
+- \`module { content }\` - Named module block
+- \`path=value;\` - Parameter (path= specifies output location)
+- \`\`\`ts ... \`\`\` - Code blocks define interfaces (what to export)
+- Plain text - Prose describing behavior
 
-Required fields:
-- name: Short identifier (e.g., "parser", "types", "cli")
-- prompt: DETAILED instructions including exact function signatures, types, behavior
-- files: List of files to create (e.g., ["index.ts", "types.ts"])
+## ARCHITECT RESPONSIBILITIES
 
-### gen_node (USE SPARINGLY)
-Only for complex subsystems with multiple distinct parts. Examples:
-- "compiler" with parser, human, gen subcomponents
-- "server" with routes, middleware, database subcomponents
+1. **Identify modules**: Find all \`module { }\` blocks at your level
+2. **Extract interfaces**: The \`\`\`ts code blocks show what each module exports
+3. **Spawn children**: For each module, create ONE child (node or leaf)
+4. **Pass context**: Each child receives:
+   - Its own module content (what to implement)
+   - Sibling interfaces (pre-existing code to import from, NOT to implement)
 
-## Example Good Leaf
+## PASSING SIBLING CONTEXT
 
-gen_leaf({
-  name: "parser",
-  prompt: "Create an .aid file parser with these exports:
-    - parse(content: string): AidNode[]
-    - AidNode = AidModule | AidParam | AidInclude | AidProse
-    - AidModule = { type: 'module', name: string, content: AidNode[] }
-    - Handle: modules { }, params=value;, include path;, # comments",
-  files: ["parser.ts", "types.ts"]
-})
+When spawning a child, include ONLY the relevant parts of relevant siblings.
 
-## Example Bad Pattern (DO NOT DO)
+Example: If module B needs to call A's \`parse()\` function:
+- B's prompt: "Import { parse } from '../a' - signature: parse(content: string): AidNode[]"
+- Only include what B actually uses, not A's entire interface
+- B implements B. A is pre-existing code to import from.
 
-gen_node({ name: "analyzer" }) 
-  -> gen_node({ name: "analyse" })  // Same concept, infinite loop!
-    -> gen_node({ name: "analyse_mode" })  // Still recursing!
+Don't include siblings the child doesn't interact with.
 
-Instead: Just create a gen_leaf with clear instructions.`;
+## TOOLS
+
+### gen_node
+Use when a module has 2+ nested submodules inside it.
+Pass the module's full content (including nested submodules).
+
+### gen_leaf  
+Use when a module has NO nested submodules (it's a leaf).
+The prompt must include:
+- "Use Bun and TypeScript"
+- The interface to implement (from the \`\`\`ts block)
+- Sibling interfaces to import from (mark as PRE-EXISTING)
+- Behavioral requirements from the prose
+
+## RULES
+
+1. **ONE child per module** - Don't create duplicates
+2. **Match hierarchy** - parser inside compiler { } becomes compiler/parser, NOT top-level parser
+3. **No recursion** - Don't create a child with the same name as yourself
+4. **Single pass** - Make all calls in one step, then stop`;
 
 const MAX_DEPTH = 3; // Maximum nesting depth
 
@@ -71,6 +78,7 @@ export class GenCompiler {
   private ai: GoogleGenAI;
   private differ: TreeDiffer;
   private fileCollisions: Map<string, string> = new Map(); // file -> leaf that owns it
+  private createdChildren: Map<string, Set<string>> = new Map(); // parentDir -> set of child names
 
   constructor(apiKey: string) {
     if (!apiKey) {
@@ -131,17 +139,17 @@ export class GenCompiler {
     const tools = allowNodes ? [
       {
         name: 'gen_node',
-        description: 'Create a child node for a complex sub-task with 3+ subcomponents. USE SPARINGLY.',
+        description: 'Create a child node ONLY when a module has 2+ named submodule {} blocks inside it.',
         parameters: {
           type: Type.OBJECT,
           properties: {
             name: { 
               type: Type.STRING, 
-              description: 'Name of the child node - must be different from parent!' 
+              description: 'Exact name from the module { } block in the spec' 
             },
             content: { 
               type: Type.STRING, 
-              description: 'The .aid specification for this child - be specific!' 
+              description: 'The FULL content inside that module { } block, including all nested submodules' 
             }
           },
           required: ['name', 'content']
@@ -149,22 +157,22 @@ export class GenCompiler {
       },
       {
         name: 'gen_leaf',
-        description: 'Create a leaf node for actual code generation. PREFERRED CHOICE.',
+        description: 'Create a leaf for code generation. Use for modules without nested submodule {} blocks.',
         parameters: {
           type: Type.OBJECT,
           properties: {
             name: { 
               type: Type.STRING, 
-              description: 'Name of the leaf (becomes folder name)' 
+              description: 'Exact name from the module { } block in the spec' 
             },
             prompt: { 
               type: Type.STRING, 
-              description: 'DETAILED instructions with exact types, function signatures, behavior' 
+              description: 'DETAILED code generation instructions: runtime (Bun/TS), dependencies, exports, types, behavior' 
             },
             files: {
               type: Type.ARRAY,
               items: { type: Type.STRING },
-              description: 'Files this leaf will create'
+              description: 'Files to create (e.g., ["index.ts", "types.ts"])'
             },
             commands: {
               type: Type.ARRAY,
@@ -262,12 +270,24 @@ export class GenCompiler {
           });
         }
 
-        // Send responses back to LLM
+        // Check if any succeeded - if all failed with "already exists", we're done
+        const anySucceeded = functionResponses.some(fr => fr.response.success);
+        if (!anySucceeded) {
+          console.log(`[gen] All calls failed (likely duplicates) - stopping`);
+          break;
+        }
+
+        // Send responses back to LLM with instruction to stop if done
         response = await chat.sendMessage({
           message: functionResponses.map(fr => ({
             functionResponse: {
               name: fr.name,
-              response: fr.response
+              response: {
+                ...fr.response,
+                note: fr.response.success 
+                  ? 'Created successfully. Only make more calls if there are remaining top-level modules.'
+                  : 'Failed - do not retry this item.'
+              }
             }
           }))
         });
@@ -311,6 +331,15 @@ export class GenCompiler {
     const childDir = path.join(parentDir, name);
     const childPath = path.join(childDir, 'node.gen.aid');
 
+    // Check if already created
+    if (!this.createdChildren.has(parentDir)) {
+      this.createdChildren.set(parentDir, new Set());
+    }
+    if (this.createdChildren.get(parentDir)!.has(name)) {
+      return { success: false, error: `Node '${name}' already exists in this directory. Do not create duplicates.` };
+    }
+    this.createdChildren.get(parentDir)!.add(name);
+
     // Create directory
     fs.mkdirSync(childDir, { recursive: true });
 
@@ -344,6 +373,15 @@ export class GenCompiler {
 
     const leafDir = path.join(parentDir, name);
     const leafPath = path.join(leafDir, 'leaf.gen.aid.leaf.json');
+
+    // Check if already created
+    if (!this.createdChildren.has(parentDir)) {
+      this.createdChildren.set(parentDir, new Set());
+    }
+    if (this.createdChildren.get(parentDir)!.has(name)) {
+      return { success: false, error: `Leaf '${name}' already exists in this directory. Do not create duplicates.` };
+    }
+    this.createdChildren.get(parentDir)!.add(name);
 
     // Check for file collisions
     for (const file of files) {
