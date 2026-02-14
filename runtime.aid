@@ -2,84 +2,34 @@ runtime {
   path=src/runtime;
 
   Executes the compiled plan by running all leaf nodes.
-
-  This module has 3 submodules: leafExecutor, commandWhitelist, logger.
-  The entry point (index.ts) imports from these and exports run().
+  
+  Exports a run function that takes outputDir and apiKey.
+  Finds all leaf.json files, executes them in parallel with progress reporting.
 
   leafExecutor {
     path=src/runtime/leafExecutor.ts;
 
-    ```ts
-    import { GoogleGenAI } from "@google/genai";
+    Executes a single leaf node.
     
-    export interface LeafConfig {
-      path: string;
-      dir: string;
-      prompt: string;
-      files: string[];
-      commands: string[];
-    }
-
-    export async function executeLeaf(leaf: LeafConfig, ai: GoogleGenAI): Promise<void>;
-    ```
-
-    Process:
-      1. Run whitelisted commands in leaf.dir
-      2. Call Gemini with leaf.prompt, using write_file tool
-      3. LLM creates each file in leaf.files
-      4. Validate all required files were written
+    Exports LeafConfig interface and executeLeaf function.
+    Runs whitelisted commands, then calls Gemini to generate files.
   }
 
   commandWhitelist {
     path=src/runtime/commandWhitelist.ts;
 
-    ```ts
-    export const DEFAULT_WHITELIST: string[] = [
-      "npm init", "npm install", "npm ci",
-      "bun init", "bun install", "bun add"
-    ];
-
-    export function isAllowed(command: string, whitelist?: string[]): boolean;
-    ```
+    Defines which shell commands are allowed.
+    
+    Exports DEFAULT_WHITELIST array and isAllowed function.
+    Default allows npm init/install/ci and bun init/install/add.
   }
 
   logger {
     path=src/runtime/logger.ts;
 
-    ```ts
-    export interface LogEntry {
-      timestamp: string;
-      type: "command" | "llm_call" | "file_write" | "error";
-      leaf?: string;
-      details: Record<string, unknown>;
-    }
-
-    export function createLogger(outputDir: string): {
-      log(entry: Omit<LogEntry, "timestamp">): void;
-      close(): void;
-    };
-    ```
+    Logs operations to a JSONL file.
     
-    Writes JSONL to outputDir/runtime.log.jsonl
-  }
-
-  index {
-    path=src/runtime/index.ts;
-
-    Entry point that ties the submodules together.
-
-    ```ts
-    import { executeLeaf, LeafConfig } from "./leafExecutor";
-    import { createLogger } from "./logger";
-    import { GoogleGenAI } from "@google/genai";
-
-    export async function run(outputDir: string, apiKey: string): Promise<void>;
-    ```
-
-    Process:
-      1. Create GoogleGenAI client
-      2. Find all .leaf.json files recursively in outputDir
-      3. Execute each leaf in parallel with progress reporting
-      4. Log all operations
+    Exports LogEntry interface and createLogger function.
+    Writes to runtime.log.jsonl in the output directory.
   }
 }

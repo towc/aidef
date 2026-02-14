@@ -1,105 +1,54 @@
 compiler {
   path=src/compiler;
   
-  Compiles .aid files into an execution plan (.gen.aid tree with .leaf.json leaves).
-
-  This module has 4 submodules: parser, resolver, llmCompiler, treeDiff.
-  The entry point (index.ts) imports from these and exports compile().
+  Compiles .aid files into an execution plan.
+  
+  Exports a compile function that takes rootFile, outputDir, and apiKey.
+  First runs the resolver, then the llmCompiler.
 
   parser {
     path=src/compiler/parser.ts;
     
     Deterministic parser for .aid syntax. No LLM involved.
-
-    ```ts
-    export type AidNode = AidModule | AidParam | AidInclude | AidProse;
-    export interface AidModule { type: "module"; name: string; content: AidNode[]; }
-    export interface AidParam { type: "param"; name: string; value: string; }
-    export interface AidInclude { type: "include"; path: string; }
-    export interface AidProse { type: "prose"; text: string; }
     
-    export function parse(content: string): AidNode[];
-    export function stringify(nodes: AidNode[]): string;
-    ```
+    Exports parse and stringify functions, plus type definitions for the AST nodes:
+    AidNode (union of Module, Param, Include, Prose), and each of those interfaces.
 
     Syntax rules:
-      - `include path;` - include directive
-      - `name { content }` - module block  
-      - `name=value;` - parameter
-      - Everything else is prose
-      - Code blocks (triple backticks) are treated as opaque prose, not parsed
+      - include path; is an include directive
+      - name { content } is a module block  
+      - name=value; is a parameter
+      - everything else is prose
+      - code blocks (triple backticks) are opaque prose, not parsed inside
   }
 
   resolver {
     path=src/compiler/resolver.ts;
 
-    Deterministic pre-processing. Resolves all includes into a single .gen.aid file.
-
-    ```ts
-    import { parse, stringify, AidNode } from "./parser";
+    Deterministic pre-processing. Resolves all includes into a single file.
     
-    export async function resolve(rootFile: string, outputDir: string): Promise<string>;
-    ```
-
-    Process:
-      1. Read rootFile
-      2. Parse with parser
-      3. For each include node:
-         - If .aid file: recursively resolve and inline
-         - If other file (e.g. .md): read content, wrap as prose
-         - If https URL: fetch and process same as above
-      4. Write resolved content to outputDir/node.gen.aid
-      5. Return the output path
+    Exports a resolve function that takes rootFile and outputDir.
+    Uses the parser to parse, recursively inlines includes, writes output.
   }
 
   llmCompiler {
     path=src/compiler/llmCompiler.ts;
 
     LLM-powered compilation of resolved .aid into execution plan.
-
-    ```ts
-    import { parse, AidNode, AidModule } from "./parser";
-    import { GoogleGenAI } from "@google/genai";
     
-    export async function compileNode(genAidPath: string, apiKey: string, depth?: number): Promise<void>;
-    ```
-
-    Uses Gemini API with function calling. Provides two tools:
-      - gen_node(name, content): Create child node for complex modules, recurse
-      - gen_leaf(name, prompt, files, commands): Create leaf.json for simple modules
-
-    Key behaviors:
-      - Temperature=0 for deterministic output
-      - Max depth (default 3) before forcing leaves
-      - Each node acts as architect, passing relevant sibling context to children
+    Exports a compileNode function that takes the resolved aid path and apiKey.
+    
+    Uses Gemini with function calling. Provides gen_node and gen_leaf tools.
+    Each node acts as architect, identifying submodules and spawning children.
+    Passes relevant sibling context when spawning.
+    Temperature=0 for deterministic output.
   }
 
   treeDiff {
     path=src/compiler/treeDiff.ts;
 
     Caching via content hashing to skip unchanged subtrees.
-
-    ```ts
-    export function hashContent(content: string): string;
-    export function loadPreviousHash(genAidPath: string): string | null;
-    export function saveHash(genAidPath: string, hash: string): void;
-    export function pruneBranch(dir: string): void;
-    ```
-  }
-
-  index {
-    path=src/compiler/index.ts;
-
-    Entry point that ties the submodules together.
-
-    ```ts
-    import { resolve } from "./resolver";
-    import { compileNode } from "./llmCompiler";
-
-    export async function compile(rootFile: string, outputDir: string, apiKey: string): Promise<void> {
-      const genAidPath = await resolve(rootFile, outputDir);
-      await compileNode(genAidPath, apiKey);
-    }
-    ```
+    
+    Exports functions for hashing content, loading/saving previous hashes, and pruning branches.
   }
 }

@@ -1,10 +1,10 @@
 /**
- * Human Compiler
+ * Resolver
  * 
  * Processes human-written .aid files:
  * 1. Resolves all `include` statements recursively
  * 2. Escapes `#` in non-.aid includes (like markdown)
- * 3. Outputs a single node.gen.aid file with all includes resolved
+ * 3. Outputs a single .resolved.aid file with all includes resolved
  */
 
 import * as fs from 'node:fs';
@@ -23,11 +23,11 @@ export class HumanCompiler {
   }
 
   /**
-   * Compile a human .aid file, resolving all includes.
-   * Returns the path to the generated node.gen.aid
+   * Resolve a human .aid file, resolving all includes.
+   * Returns the path to the generated .resolved.aid file
    */
   async compile(rootPath: string): Promise<string> {
-    console.log(`[resolver] Compiling ${rootPath}`);
+    console.log(`[resolver] Resolving ${rootPath}`);
     
     const absolutePath = path.resolve(rootPath);
     const content = await this.resolveFile(absolutePath);
@@ -35,8 +35,9 @@ export class HumanCompiler {
     // Ensure output directory exists
     fs.mkdirSync(this.outputDir, { recursive: true });
     
-    // Write to node.gen.aid in output directory
-    const outputPath = path.join(this.outputDir, 'node.gen.aid');
+    // Write to <basename>.resolved.aid in output directory
+    const baseName = path.basename(rootPath, '.aid');
+    const outputPath = path.join(this.outputDir, `${baseName}.resolved.aid`);
     fs.writeFileSync(outputPath, content, 'utf-8');
     
     console.log(`[resolver] Generated ${outputPath}`);

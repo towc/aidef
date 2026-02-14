@@ -4,48 +4,29 @@ aidef is a high-level programming language that compiles .aid specification file
 
 target=typescript/bun;
 
-Top-level module interfaces (how they connect):
-
-```ts
-// src/compiler/index.ts exports:
-export async function compile(rootFile: string, outputDir: string, apiKey: string): Promise<void>;
-
-// src/runtime/index.ts exports:
-export async function run(outputDir: string, apiKey: string): Promise<void>;
-
-// src/index.ts (CLI entry point):
-import { compile } from "./compiler";
-import { run } from "./runtime";
-```
-
 include compiler.aid;
 include runtime.aid;
 
 environment {
-  GEMINI_API_KEY: Required. Used by compiler and runtime for LLM calls.
+  GEMINI_API_KEY is required for LLM calls during compilation and runtime.
 }
 
 cli {
   path=src/index.ts;
   
-  Entry point for the aidef tool.
-  Uses commander for arg parsing.
+  Entry point for the aidef tool. Uses commander for arg parsing.
   
-  ```ts
-  import { compile } from "./compiler";
-  import { run } from "./runtime";
-  ```
+  Imports compile from the compiler module and run from the runtime module.
   
   Commands:
-    compile [file] - Calls compile(file || "root.aid", outputDir, apiKey)
-                     Default outputDir is /tmp/aidef-<n> where n is next available.
-    run            - Requires --output. Calls run(outputDir, apiKey).
-    analyse        - Requires --output. Not yet implemented.
-    browse         - Requires --output. Not yet implemented.
+    compile [file] - compiles the given .aid file (default: root.aid) to the output directory
+    run - executes a previously compiled plan from the output directory
+    analyse - analyzes the plan and suggests improvements (not yet implemented)
+    browse - TUI to inspect the plan (not yet implemented)
 
   Options:
-    --output, -o <dir>  Output directory for compilation artifacts.
-    --max-parallel <n>  Max parallel LLM calls. Default 10.
-    --max-retries <n>   Max retries per LLM call. Default 3.
-    --max-depth <n>     Max node depth. Default 5.
+    --output, -o sets the output directory (default: /tmp/aidef-<n>)
+    --max-parallel limits concurrent LLM calls (default: 10)
+    --max-retries for failed LLM calls (default: 3)
+    --max-depth for compilation tree (default: 5)
 }

@@ -2,6 +2,7 @@
 node_modules
 
 # AIDef compilation artifacts
+*.resolved.aid
 *.gen.aid
 *.gen.aid.prev
 *.gen.aid.leaf.json
