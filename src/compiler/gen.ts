@@ -33,9 +33,12 @@ You are NOT implementing code - you are PLANNING and DELEGATING.
 
 ## PATH INHERITANCE
 
-If parent has \`path=src/compiler;\` and child is named \`parser\`, the child's output goes to \`src/compiler/parser.ts\` (or \`src/compiler/parser/\` if it's a node with multiple files).
+If parent has \`path=src/compiler;\` and child is named \`parser\`:
+- The child's outputPath is ALSO \`src/compiler\` (it inherits from parent)
+- The child creates file(s) like \`parser.ts\` in that directory
 
-Submodules do NOT repeat the full path - they inherit from parent.
+Submodules inherit the SAME outputPath as parent. Do NOT create subdirectories like \`src/compiler/parser/\`.
+All siblings output to the same directory. Use different filenames to distinguish them.
 
 ## ARCHITECT RESPONSIBILITIES
 
@@ -61,29 +64,50 @@ Your leaf prompt should be CONCRETE:
    - export interface AidModule { type: 'module'; name: string; content: AidNode[] }
    ..."
 
+## CRITICAL: DO NOT DIVERGE FROM PARENT INSTRUCTIONS
+
+When the spec contains SPECIFIC details (package names, API patterns, function signatures, code blocks), you MUST preserve them EXACTLY in child prompts. Do NOT substitute similar alternatives.
+
+- If spec says "@google/genai" -> use "@google/genai", NOT "@google/generative-ai"
+- If spec shows \`new GoogleGenAI({ apiKey })\` -> use that exact pattern
+- If spec shows \`ai.chats.create\` -> use that, NOT \`getGenerativeModel\`
+- Code blocks in the spec are AUTHORITATIVE - copy them verbatim into leaf prompts
+
+You are passing instructions DOWN the tree. Children cannot see the original spec - they only see what you give them. If you change or omit details, they are lost forever.
+
 ## PASSING SIBLING CONTEXT
 
-When a child needs to import from a sibling, include the relevant interface.
+When a child needs to import from a sibling, include the FULL interface definitions.
 
 Example: resolver needs parse() from parser:
-  "PRE-EXISTING: Import { parse, AidNode } from '../parser'
-   Signature: parse(content: string): AidNode[]"
+  "PRE-EXISTING: Import { parse, AidNode, AidInclude, AidModule, AidParam, AidProse } from './parser'
+   
+   Type definitions:
+   type AidNode = AidModule | AidParam | AidInclude | AidProse;
+   interface AidInclude { type: 'include'; path: string; }
+   interface AidModule { type: 'module'; name: string; content: AidNode[]; }
+   ...
+   
+   Function: parse(content: string): AidNode[]"
 
-Only include what the child actually uses.
+Include ALL type definitions the child will need to use. If they're accessing fields like \`node.path\`, they need to know the interface has a \`path\` field.
 
 ## CREATING ENTRY POINTS
 
-If a module has submodules but also exports its own interface, create a leaf for the entry point.
-Name it based on the export (e.g., "index" for index.ts).
+If a module has submodules but also has prose describing exports (like "Exports a run function..."), 
+create a leaf named "index" for that entry point. This creates index.ts in the module's outputPath.
+
+IMPORTANT: Never name a leaf the same as its parent module. Use "index" instead.
 
 ## TOOLS
 
 ### gen_node
-Use when a module has 2+ nested submodules inside it.
+Use ONLY when a module has 2+ nested \`name { }\` blocks inside it.
 Pass the module's content for the child node to further decompose.
 
 ### gen_leaf  
-Use when a module is simple enough to implement directly.
+Use when a module should generate code. This is the DEFAULT choice.
+If content has NO nested \`name { }\` blocks, you MUST use gen_leaf.
 
 The "files" array should contain ONLY filenames (e.g., ["parser.ts", "types.ts"]).
 Do NOT include full paths like "src/compiler/parser.ts" - just the filename.
@@ -95,14 +119,24 @@ The prompt MUST include:
 - Behavioral requirements
 - PRE-EXISTING sibling imports if needed
 
+IMPORTANT: The prompt should NOT mention full paths like "Create src/compiler/index.ts".
+The outputPath already specifies where files go. Just describe what the file should contain.
+Example: Instead of "Create src/compiler/index.ts which exports...", say "Create index.ts which exports..."
+
+## CRITICAL: ALWAYS CREATE SOMETHING
+
+If you receive content with NO nested \`name { }\` blocks, you MUST create a gen_leaf for it.
+Never leave a module without creating either a gen_node or gen_leaf.
+
 ## RULES
 
 1. **ONE child per module** - Don't create duplicates
-2. **Match hierarchy** - Nested modules become nested children
+2. **Match hierarchy** - Nested \`name { }\` blocks become gen_node children
 3. **No recursion** - Don't create a child with the same name as yourself
-4. **Single pass** - Make all calls in one step, then stop
-5. **Be concrete** - Transform abstract prose into specific TypeScript
-6. **Files are filenames only** - Not paths, just names like "index.ts"`;
+4. **Entry points** - If module prose describes exports but also has submodules, create a leaf named "index" for the entry point
+5. **Single pass** - Make all calls in one step, then stop
+6. **Be concrete** - Transform abstract prose into specific TypeScript
+7. **Files are filenames only** - Not paths, just names like "index.ts"`;
 
 const MAX_DEPTH = 3; // Maximum nesting depth
 
@@ -155,7 +189,13 @@ export class GenCompiler {
     }
 
     // Process with LLM
-    await this.processWithLLM(content, nodeDir, depth);
+    const createdAny = await this.processWithLLM(content, nodeDir, depth);
+
+    // If LLM didn't create any children, force a leaf creation for this content
+    if (!createdAny) {
+      console.log(`[gen] No children created for ${nodeDir}, auto-creating leaf`);
+      await this.autoCreateLeaf(content, nodeDir);
+    }
 
     // Save for future diffing
     this.differ.savePrevious(genAidPath, content);
@@ -163,8 +203,10 @@ export class GenCompiler {
 
   /**
    * Use LLM to process the .aid content and generate children
+   * @returns true if any children were created, false otherwise
    */
-  private async processWithLLM(content: string, nodeDir: string, depth: number): Promise<void> {
+  private async processWithLLM(content: string, nodeDir: string, depth: number): Promise<boolean> {
+    let createdAny = false;
     // Only allow gen_node if we haven't reached max depth
     const allowNodes = depth < MAX_DEPTH;
     
@@ -199,7 +241,7 @@ export class GenCompiler {
             },
             outputPath: {
               type: Type.STRING,
-              description: 'Output path from path= param, relative to project root (e.g., "src/compiler"). Inherit from parent if not specified in module.'
+              description: 'Output path inherited from parent path= param (e.g., "src/compiler"). Do NOT add subdirectories. All siblings use the same outputPath.'
             },
             sourceAid: {
               type: Type.STRING,
@@ -320,6 +362,9 @@ export class GenCompiler {
 
         // Check if any succeeded - if all failed with "already exists", we're done
         const anySucceeded = functionResponses.some(fr => fr.response.success);
+        if (anySucceeded) {
+          createdAny = true;
+        }
         if (!anySucceeded) {
           console.log(`[gen] All calls failed (likely duplicates) - stopping`);
           break;
@@ -348,6 +393,54 @@ export class GenCompiler {
     } catch (error) {
       console.error(`[gen] LLM processing failed:`, error);
     }
+
+    return createdAny;
+  }
+
+  /**
+   * Auto-create a leaf when the LLM doesn't create any children.
+   * This happens when a node has no submodules but LLM didn't realize it should be a leaf.
+   */
+  private async autoCreateLeaf(content: string, nodeDir: string): Promise<void> {
+    // Extract useful info from the content
+    const name = path.basename(nodeDir);
+    
+    // Try to find path= param in content
+    const pathMatch = content.match(/path=([^;\s]+)/);
+    const outputPath = pathMatch ? pathMatch[1] : 'src';
+    
+    // Try to find sourceAid - look for common patterns or default to the node name
+    const sourceAid = `${name}.aid`;
+    
+    // Use the content as the prompt, adding concrete requirements
+    const prompt = `Use Bun and TypeScript.
+
+Based on the following specification, implement the required functionality:
+
+${content}
+
+Export all public interfaces and functions as described.`;
+
+    // Default to a single file named after the module
+    const files = [`${name}.ts`];
+
+    const leafDir = path.join(nodeDir, 'auto');
+    const leafPath = path.join(leafDir, 'leaf.gen.aid.leaf.json');
+
+    fs.mkdirSync(leafDir, { recursive: true });
+
+    const leaf: GenLeaf = {
+      path: leafPath,
+      dir: leafDir,
+      outputPath,
+      sourceAid,
+      prompt,
+      files,
+      commands: []
+    };
+
+    fs.writeFileSync(leafPath, JSON.stringify(leaf, null, 2), 'utf-8');
+    console.log(`[gen] Auto-created leaf: ${leafPath} -> ${outputPath}/${files[0]}`);
   }
 
   /**

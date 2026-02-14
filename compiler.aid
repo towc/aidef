@@ -29,77 +29,112 @@ compiler {
   
   Each node and leaf has its own folder in the compilation output, but files are written to outputPath locations.
   
-  Exports a compile function that takes rootFile, outputDir, and apiKey.
-  First runs the resolver, then the llmCompiler.
+  Creates index.ts which exports:
+    export async function compile(rootFile: string, outputDir: string, apiKey: string): Promise<void>
+  
+  The compile function:
+    1. Creates a Resolver (from ./resolver) and calls resolve(rootFile, outputDir) to get the resolved .aid path
+    2. Creates a GenCompiler (from ./gen) with apiKey and calls compile(resolvedAidPath)
 
   parser {
     Deterministic parser for .aid syntax. No LLM involved.
-    Used by both resolver and compiler phases.
+    Creates parser.ts.
     
-    Exports parse and stringify functions, plus type definitions for the AST nodes.
-
-    Syntax to handle:
-      include path; statements - can be local .aid file or https link
-      name { content } blocks define named modules
-      name=value; defines parameters
-      Everything else is prose
-      Code blocks (triple backticks) are opaque prose, not parsed inside
+    Exports:
+      - AidNode type union: AidModule | AidParam | AidInclude | AidProse
+      - AidModule: { type: 'module', name: string, content: AidNode[] }
+      - AidParam: { type: 'param', name: string, value: string }
+      - AidInclude: { type: 'include', path: string }
+      - AidProse: { type: 'prose', text: string }
+      - parse(content: string): AidNode[]
+      - stringify(nodes: AidNode[]): string
+    
+    Parsing rules:
+      - "include path;" -> AidInclude (path can be local file or https URL)
+      - "name { ... }" -> AidModule (recursively parse content)
+      - "name=value;" -> AidParam
+      - Everything else -> AidProse
+      - Triple backtick code blocks are treated as opaque prose (don't parse inside)
   }
 
   resolver {
     Deterministic pre-processing of human-written .aid files. No LLM involved.
-    Our tool never modifies human-written files - they are the source code.
+    Creates resolver.ts.
     
-    Exports a resolve function that takes rootFile and outputDir.
+    Exports:
+      - Resolver class with resolve(rootFile: string, outputDir: string): Promise<string>
+      - The resolve method returns the path to the resolved .aid file
     
-    This phase:
-      1. Reads the root .aid file
-      2. Recursively resolves all include statements
-      3. For non-.aid includes, wraps content as prose
-      4. Outputs resolved content to the output directory
+    Implementation:
+      1. Read the root .aid file using Bun.file()
+      2. Use the parser (import { parse } from './parser') to get AST
+      3. Recursively resolve include statements:
+         - Local .aid files: read and parse, inline content
+         - https links: fetch and inline as prose
+      4. Write resolved content to outputDir/root.resolved.aid
+      5. Return the path to the resolved file
   }
 
-  llmCompiler {
+  gen {
     LLM-powered compilation of resolved .aid into nodes and leaves.
+    Creates gen.ts.
     
-    Every node is a planner for its subtree. The root node takes extra care:
-      - It sees the raw human spec with all its ambiguity
-      - It must establish stable module boundaries matching the human's intent
-      - Its structure determines how well tree diffing works downstream
-      - It should create an initial setup leaf that runs bun init to set up the project
+    Dependencies (use exact package names):
+    ```
+    import { GoogleGenAI, Type } from '@google/genai';
+    ```
     
-    When processing any node:
-      1. Parse the .aid content to find modules and their path= params
-      2. Track the current outputPath (inherited from parent or set by path=)
-      3. Send to LLM with system prompt explaining the format
-      4. LLM uses tools: gen_node (spawn child node), gen_leaf (create leaf)
-      5. Pass outputPath to children so they know where their files go
-      6. Recursively compile child nodes
+    Exports:
+      - GenCompiler class with compile(genAidPath: string, depth?: number) method
     
-    gen_leaf tool requires: name, outputPath, prompt, files, and optionally commands.
-    gen_node tool requires: name, content, and the parent's outputPath for inheritance.
+    Constructor takes apiKey string, creates GoogleGenAI instance:
+    ```
+    this.ai = new GoogleGenAI({ apiKey });
+    ```
     
-    Temperature=0 for deterministic output.
+    The compile method:
+      1. Reads the .gen.aid file content using fs.readFileSync
+      2. Checks tree diff - skip if unchanged (use TreeDiffer from ./diff)
+      3. If changed, prune old branch first
+      4. Process with LLM using ai.chats.create then chat.sendMessage
+      5. Save content for future diffing
     
-    Encapsulation: each node fully encapsulates its children's context.
-      When spawning a child, parent provides the child's spec plus relevant sibling interfaces.
-      The child cannot see parent's full spec or sibling implementations.
-      This isolation enables parallel compilation and stable tree diffing.
+    LLM tools to define (use Type from @google/genai for schema):
+      - gen_node: { name: string, content: string } - creates child directory with node.gen.aid
+      - gen_leaf: { name: string, outputPath: string, sourceAid: string, prompt: string, files: string[], commands?: string[] }
     
-    Exports a compileNode function that takes the resolved aid path and apiKey.
+    System prompt should explain:
+      - You are an architect that decomposes specs into nodes/leaves
+      - Transform abstract prose into concrete TypeScript interfaces
+      - path= param sets output location, children inherit it
+      - Files array contains only filenames, not paths
+    
+    Handle tool calls in a loop:
+      - Get response.functionCalls
+      - For gen_node: create directory, write node.gen.aid, recursively compile
+      - For gen_leaf: create directory, write leaf.gen.aid.leaf.json
+      - Send functionResponse back to LLM
+      - Continue until no more function calls
+    
+    Use temperature=0 for deterministic output.
+    Track created children per directory to prevent duplicates.
+    Track file collisions across leaves.
   }
 
-  treeDiff {
-    Caching via content hashing to skip unchanged subtrees.
+  diff {
+    Caching via content comparison to skip unchanged subtrees.
+    Creates diff.ts.
     
-    Goal: if a developer changes one line in root.aid, only affected branches recompile.
+    Exports:
+      - TreeDiffer class with methods:
+        - loadPrevious(genAidPath: string): string | null - reads .prev file if exists
+        - savePrevious(genAidPath: string, content: string): void - writes .prev file
+        - isUnchanged(previous: string, current: string): boolean - compares content
+        - pruneBranch(nodeDir: string): void - deletes child directories
     
-    Diffing happens at module boundaries. When parent changes, we compare each child's spec:
-      1. Hash the content that would be passed to each gen_node/gen_leaf call
-      2. Compare to hash stored in existing output
-      3. If unchanged, skip that subtree
-      4. If changed, prune and recompile only that subtree
-    
-    Exports functions for hashing content, loading/saving previous hashes, and pruning branches.
+    Implementation:
+      - .prev files store previous content next to .gen.aid files
+      - isUnchanged does simple string comparison
+      - pruneBranch uses fs.rmSync with recursive option
   }
 }

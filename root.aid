@@ -18,16 +18,15 @@ Once everything is compiled, the developer has the option to inspect the plan an
 
 include runtime.aid;
 
-environment {
-  GEMINI_API_KEY is required for LLM calls during compilation and runtime.
-}
-
 cli {
-  path=src/index.ts;
+  path=src;
   
-  Entry point for the aidef tool. Uses commander for arg parsing.
+  Entry point for the aidef tool. Creates index.ts. Uses commander for arg parsing.
   
-  Imports compile from the compiler module and run from the runtime module.
+  Imports:
+  - { compile } from './compiler'
+  - { run } from './runtime'
+  - Gets GEMINI_API_KEY from process.env.GEMINI_API_KEY
   
   Commands:
     compile [file] - compiles the given .aid file (default: root.aid) to the output directory
@@ -36,7 +35,7 @@ cli {
     browse - TUI to inspect the plan (not yet implemented)
 
   Options:
-    --output, -o sets the output directory (default: /tmp/aidef-<n>)
+    --output, -o sets the output directory (default: /tmp/aidef-<n>, incrementing n)
     --max-parallel limits concurrent LLM calls (default: 10)
     --max-retries for failed LLM calls (default: 3)
     --max-depth for compilation tree (default: 5)

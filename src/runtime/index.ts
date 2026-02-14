@@ -206,9 +206,10 @@ export class AidRuntime {
 
     const systemPrompt = `You are generating code files.
 
-You MUST create these files: ${leaf.files.join(', ')}
+You MUST create these files (using ONLY the filename, not paths): ${leaf.files.join(', ')}
 
 Use the write_file tool for each file. Create complete, working code.
+The write_file tool's "path" parameter should be JUST the filename (e.g., "index.ts", NOT "src/index.ts").
 Follow the instructions in the prompt carefully.`;
 
     try {
