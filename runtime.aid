@@ -20,13 +20,18 @@ runtime {
   Finds all leaf.json files, executes them in parallel with progress reporting.
 
   leafExecutor {
-    Executes a single leaf node using Google Gemini for code generation.
+    Executes a single leaf node using Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai).
     
     Exports executeLeaf function and GenLeaf interface.
     
     Uses a chat-based approach with a write_file tool to generate each file.
     Continues the chat until all files in the leaf are written.
     Logs each file write to the logger.
+    
+    CRITICAL: The code generation LLM must NEVER DIVERGE from the leaf prompt instructions.
+    Follow them to the letter. When the prompt specifies exact package names, class names,
+    function signatures, or API patterns, use them EXACTLY as written.
+    Do NOT substitute similar-sounding alternatives (e.g., @google/generative-ai for @google/genai).
   }
 
   commandWhitelist {

@@ -84,7 +84,7 @@ compiler {
     LLM-powered compilation of resolved .aid into nodes and leaves.
     Creates gen.ts.
     
-    Uses Google Gemini for LLM calls.
+    Uses Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai).
     
     Exports GenCompiler class with compile(genAidPath: string, depth?: number) method.
     Constructor takes apiKey string.
@@ -113,6 +113,11 @@ compiler {
       - Understand path inheritance: path= sets output location, children inherit it
       - Files array contains only filenames, not paths
       - Encapsulation: each .gen.aid node is self-contained with all needed context
+      - NEVER DIVERGE from parent instructions. Follow them to the letter.
+        When the parent spec contains specific details (package names, class names, API patterns),
+        preserve them EXACTLY in child prompts. Do NOT substitute similar alternatives.
+        Children cannot see the original spec - they only see what the parent passes.
+        If you change or omit details, they are lost forever.
     
     Handle tool calls in a loop until no more function calls.
     Use temperature=0 for deterministic output.
@@ -123,6 +128,8 @@ compiler {
   diff {
     Tree diffing to avoid unnecessary inferences during compilation.
     Creates diff.ts.
+    
+    Uses Google Gemini via @google/genai package (GoogleGenAI class) for semantic comparison.
     
     When compiling, if we have the previous compiled .gen.aid content, we can avoid going deeper into that branch by checking whether the new .gen.aid content is for all practical purposes equivalent, with no deviations.
     If it is the same, then we can keep it and all of its children, and don't need to recurse further as we'd expect the output to be the same.
