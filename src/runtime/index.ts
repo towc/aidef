@@ -219,8 +219,11 @@ CRITICAL: DO NOT DIVERGE FROM THE PROMPT INSTRUCTIONS.
 - Do not substitute similar-sounding packages, classes, or method names
 - NEVER use GoogleGenerativeAI - the correct class name is GoogleGenAI
 
-IMPORTANT: When writing file content, use normal quotes. Do NOT escape single quotes as \\' or double quotes as \\".
-Write valid TypeScript/JavaScript code with proper string syntax.
+IMPORTANT STRING SYNTAX RULES:
+- Use normal single quotes (') and double quotes (") in your code
+- NEVER escape quotes with backslash like \\' or \\" - this creates invalid JavaScript
+- Example: import foo from 'bar' is correct, import foo from \\'bar\\' is WRONG
+- Only escape quotes INSIDE strings when needed, not in import statements or normal code
 
 ## CRITICAL TypeScript Syntax Rules
 

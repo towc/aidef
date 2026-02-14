@@ -152,6 +152,59 @@ Never leave a module without creating either a gen_node or gen_leaf.
 
 const MAX_DEPTH = 3; // Maximum nesting depth
 
+/**
+ * Extract top-level module names from .aid content.
+ * Matches patterns like: name { ... }
+ * Module names must be single words (identifiers) immediately followed by {
+ * Does NOT match nested modules (those inside other braces).
+ */
+function extractTopLevelModules(content: string): string[] {
+  const modules: string[] = [];
+  let depth = 0;
+  
+  // Use regex to find all `identifier {` patterns, then filter by depth
+  // We need to track depth manually because regex can't do balanced matching
+  const tokens: Array<{type: 'open' | 'close' | 'ident', value?: string, pos: number}> = [];
+  
+  // Find all { and } and identifiers followed by optional whitespace and {
+  const identPattern = /\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\{/g;
+  let match;
+  
+  // First pass: mark all brace positions
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '{') {
+      tokens.push({ type: 'open', pos: i });
+    } else if (content[i] === '}') {
+      tokens.push({ type: 'close', pos: i });
+    }
+  }
+  
+  // Second pass: find identifier { patterns at depth 0
+  while ((match = identPattern.exec(content)) !== null) {
+    const identEnd = match.index + match[0].length - 1; // position of the {
+    
+    // Calculate depth at this position
+    let depthAtPos = 0;
+    for (const token of tokens) {
+      if (token.pos >= identEnd) break;
+      if (token.type === 'open') depthAtPos++;
+      else if (token.type === 'close') depthAtPos--;
+    }
+    
+    // Only add if at depth 0 (top level of the current content)
+    if (depthAtPos === 0) {
+      const name = match[1];
+      // Filter out common prose words that might accidentally match
+      const proseWords = ['if', 'for', 'while', 'function', 'class', 'const', 'let', 'var', 'return', 'export', 'import', 'type', 'interface', 'Each', 'The', 'This', 'When', 'From', 'For', 'If'];
+      if (!proseWords.includes(name) && !modules.includes(name)) {
+        modules.push(name);
+      }
+    }
+  }
+  
+  return modules;
+}
+
 export class GenCompiler {
   private ai: GoogleGenAI;
   private differ: TreeDiffer;
@@ -221,6 +274,12 @@ export class GenCompiler {
     let createdAny = false;
     // Only allow gen_node if we haven't reached max depth
     const allowNodes = depth < MAX_DEPTH;
+    
+    // Pre-compute expected modules from the spec
+    const expectedModules = extractTopLevelModules(content);
+    if (expectedModules.length > 0) {
+      console.log(`[gen] Expected modules: ${expectedModules.join(', ')}`);
+    }
     
     const tools = allowNodes ? [
       {
@@ -423,11 +482,32 @@ export class GenCompiler {
       if (step >= maxSteps) {
         console.warn(`[gen] Reached max steps (${maxSteps})`);
       }
+      
+      // Verify all expected modules were created
+      if (expectedModules.length > 0) {
+        const createdSet = this.createdChildren.get(nodeDir) || new Set();
+        console.log(`[gen] Verification - created: [${Array.from(createdSet).join(', ')}], expected: [${expectedModules.join(', ')}]`);
+        const missing = expectedModules.filter(m => !createdSet.has(m));
+        if (missing.length > 0) {
+          console.warn(`[gen] Missing modules: ${missing.join(', ')} - creating auto-leaves`);
+          // Auto-create leaves for missing modules
+          for (const moduleName of missing) {
+            // Extract the module content from spec
+            const moduleRegex = new RegExp(`${moduleName}\\s*\\{([\\s\\S]*?)\\}`, 'g');
+            const match = moduleRegex.exec(content);
+            const moduleContent = match ? match[1] : `Implements ${moduleName} functionality`;
+            
+            await this.autoCreateLeafForModule(moduleName, moduleContent, nodeDir, content);
+            createdAny = true;
+          }
+        }
+      }
 
     } catch (error) {
       console.error(`[gen] LLM processing failed:`, error);
     }
-
+    
+    console.log(`[gen] Finished processWithLLM for ${nodeDir}, createdAny=${createdAny}`);
     return createdAny;
   }
 
@@ -475,6 +555,59 @@ Export all public interfaces and functions as described.`;
 
     fs.writeFileSync(leafPath, JSON.stringify(leaf, null, 2), 'utf-8');
     console.log(`[gen] Auto-created leaf: ${leafPath} -> ${outputPath}/${files[0]}`);
+  }
+
+  /**
+   * Auto-create a leaf for a specific module that the LLM missed.
+   */
+  private async autoCreateLeafForModule(
+    moduleName: string, 
+    moduleContent: string, 
+    parentDir: string,
+    parentContent: string
+  ): Promise<void> {
+    // Try to find path= param in parent content
+    const pathMatch = parentContent.match(/path=([^;\s]+)/);
+    const outputPath = pathMatch ? pathMatch[1] : 'src';
+    
+    // Try to infer source aid file
+    const sourceAidMatch = parentContent.match(/from ([^\s]+\.aid)/);
+    const sourceAid = sourceAidMatch ? sourceAidMatch[1] : `${path.basename(parentDir)}.aid`;
+    
+    // Use the module content as the prompt
+    const prompt = `Use Bun and TypeScript.
+
+Based on the following specification for the "${moduleName}" module, implement the required functionality:
+
+${moduleContent}
+
+Export all public interfaces and functions as described.`;
+
+    const files = [`${moduleName}.ts`];
+    const leafDir = path.join(parentDir, moduleName);
+    const leafPath = path.join(leafDir, 'leaf.gen.aid.leaf.json');
+
+    fs.mkdirSync(leafDir, { recursive: true });
+
+    const leaf: GenLeaf = {
+      path: leafPath,
+      dir: leafDir,
+      outputPath,
+      sourceAid,
+      prompt,
+      files,
+      commands: []
+    };
+
+    fs.writeFileSync(leafPath, JSON.stringify(leaf, null, 2), 'utf-8');
+    
+    // Track that we created this child
+    if (!this.createdChildren.has(parentDir)) {
+      this.createdChildren.set(parentDir, new Set());
+    }
+    this.createdChildren.get(parentDir)!.add(moduleName);
+    
+    console.log(`[gen] Auto-created missing leaf: ${leafPath} -> ${outputPath}/${moduleName}.ts`);
   }
 
   /**
@@ -559,20 +692,27 @@ Export all public interfaces and functions as described.`;
       this.createdChildren.set(parentDir, new Set());
     }
     if (this.createdChildren.get(parentDir)!.has(name)) {
+      console.log(`[gen] Leaf '${name}' already exists in ${parentDir}`);
       return { success: false, error: `Leaf '${name}' already exists in this directory. Do not create duplicates.` };
     }
-    this.createdChildren.get(parentDir)!.add(name);
 
-    // Check for file collisions using outputPath
+    // Check for file collisions using outputPath BEFORE adding to createdChildren
     for (const file of files) {
       const absoluteFile = path.join(outputPath, file);
       const existingOwner = this.fileCollisions.get(absoluteFile);
       if (existingOwner) {
+        console.log(`[gen] File collision: ${absoluteFile} owned by ${existingOwner}`);
         return { 
           success: false, 
           error: `File collision: ${file} at ${outputPath} already owned by ${existingOwner}` 
         };
       }
+    }
+
+    // Now add to tracking (after all validation passes)
+    this.createdChildren.get(parentDir)!.add(name);
+    for (const file of files) {
+      const absoluteFile = path.join(outputPath, file);
       this.fileCollisions.set(absoluteFile, name);
     }
 
