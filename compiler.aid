@@ -48,18 +48,37 @@ compiler {
 
   human {
     path=src/compiler/human;
-    Processes human-written .aid files before LLM compilation.
+    Processes human-written .aid files. Two sub-phases:
 
-    If no --path is passed, starts with root.aid;
-    Our tool never modifies human-written files, they are the source code;
+    resolver {
+      If no --path is passed, starts with root.aid;
+      Our tool never modifies human-written files, they are the source code;
 
-    In human mode, it:
-      1. Reads root.aid
-      2. Recursively resolves all `include` statements
-      3. Escapes `#` in non-.aid includes (e.g., markdown)
-      4. Outputs ./node.gen.aid as the entry point for gen mode
+      This phase:
+        1. Reads root.aid
+        2. Recursively resolves all `include` statements
+        3. Escapes `#` in non-.aid includes (e.g., markdown)
+        4. Outputs resolved content for the initial planner
 
-    This is a deterministic pre-compilation step, no LLM involved.
+      This is deterministic, no LLM involved.
+    }
+
+    initial_planner {
+      The first LLM call. Takes resolved content and produces node.gen.aid.
+
+      This is a planning step, like all gen nodes, but it requires extra care:
+        - It sees the raw human spec with all its ambiguity
+        - It must establish stable module boundaries matching the human's intent
+        - Its structure determines how well tree diffing works downstream
+        - It should identify top-level modules from the human's `module { }` blocks
+        - It defines interfaces between those modules
+
+      The initial planner must be especially deterministic (temperature=0) because:
+        - Any instability here cascades to all children
+        - Module boundary changes would invalidate the entire tree diff
+
+      Output: node.gen.aid with a well-structured plan ready for recursive gen compilation.
+    }
   }
 
   gen {
