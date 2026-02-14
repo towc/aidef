@@ -1,10 +1,21 @@
-aidef is a high-level programming language that compiles .aid specification files into code via AI.
+aidef is a new high-level programming language that allows developers to write the source code (.aid files) of a project for an AI to build.
 
-.aid files use an nginx-like syntax with prose. This file (root.aid) is the specification for aidef itself.
+The point of a programming language is to translate human thoughts into unambiguous instructions.
+  The more high-level a language is, the easier it is for the user, typically, but not if it's at the cost of not being able to specify details. Think about how javascript still has bitwise operators and some low-level tooling despite being a high-level language - that's one of the reasons it's so popular.
+  Aidef is no different. It's the next step above transpilation: transistors <- cpu instructions <- machine code <- assembly <- low-level language <- interpreters <- high-level language <- transpilers <- aidef.
+  The aidef build tool is a transpiler from .aid files into other high- or low-level languages that have deterministic runners (e.g. typescript or python or rust), but we do this carefully and cleverly to minimize AI inference costs and build times.
 
-target=typescript/bun;
+.aid files have a parseable syntax resembling nginx configuration, except it allows for prose.
+This is the root.aid file for the aidef project - it is a good example of how .aid files look like.
+
+This project targets typescript/bun.
+
+The core of aidef is to have a pipeline to take these .aid files into an actionable highly parallelizable plan. We call this plan generation "compilation".
 
 include compiler.aid;
+
+Once everything is compiled, the developer has the option to inspect the plan and make adjustments to the human .aid files and re-compile, before executing the plan with the runtime.
+
 include runtime.aid;
 
 environment {
