@@ -18,14 +18,46 @@ Once everything is compiled, the developer has the option to inspect the plan an
 
 include runtime.aid;
 
+environment {
+  GEMINI_API_KEY: Required for LLM compilation and runtime;
+}
+
 cli {
-  --compile: runs the compiler to completion;
-  --run: executes the runtime;
-  --analyse {
-    looks at the compiled plan, the ai call logs from the compilation (and runtime if already executed), and analyses it to determine the flow of instructions via parseable .gen.aid.map files, similar to javascript source maps, indicating what line of code in the corresponding .aid file came from which line of code of which other file;
-    It also looks at whether there was some miscommunication between parent and child, or whether a node took a long time to reach an answer that could have been reached much more quickly with a small hint, then records it in a .gen.aid.info file (including any questions for the user), and provides suggestions (recursively based on the .aid.map files) on which original human .aid file should be ammended and how.
+  path=src/cli;
+  Entry point for the aidef tool. Uses commander or similar for arg parsing.
+
+  commands {
+    compile {
+      Usage: aidef compile [file];
+      Runs the resolver then compiler on the given .aid file (default: root.aid);
+      Outputs to the directory specified by --output;
+    }
+
+    run {
+      Usage: aidef run --output <dir>;
+      Executes the runtime on a previously compiled plan;
+      Requires --output to specify which compilation output to run;
+    }
+
+    analyse {
+      Usage: aidef analyse --output <dir>;
+      Looks at the compiled plan, the AI call logs from compilation (and runtime if already executed);
+      Determines the flow of instructions via parseable .gen.aid.map files (similar to javascript source maps);
+      Identifies miscommunication between parent and child, or slow paths that could be faster with hints;
+      Records findings in .gen.aid.info files and suggests amendments to human .aid files;
+    }
+
+    browse {
+      Usage: aidef browse --output <dir>;
+      A TUI tool to inspect the plan files and analysis output;
+      Options to automatically (or manually) implement suggested changes;
+    }
   }
-  --browse {
-    a tui tool to inspect the plan files and analysis output, with options to automatically (or manually) implement them.
+
+  options {
+    --output: Output directory for compilation artifacts. Default: /tmp/aidef-<n> where n is the next available number;
+    --max-parallel: Maximum parallel LLM calls during compilation and runtime. Default: 10;
+    --max-retries: Maximum retries for failed LLM calls. Default: 3;
+    --max-depth: Maximum node depth during compilation. Default: 5;
   }
 }

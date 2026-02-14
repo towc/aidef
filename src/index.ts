@@ -9,51 +9,111 @@
  *   browse   - Interactive TUI for the plan (TODO)
  */
 
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { HumanCompiler } from './compiler/human';
 import { GenCompiler } from './compiler/gen';
 import { AidRuntime } from './runtime';
 
+interface CliOptions {
+  output?: string;
+  maxParallel?: number;
+  maxRetries?: number;
+  maxDepth?: number;
+}
+
+/**
+ * Parse CLI arguments into options
+ */
+function parseArgs(args: string[]): { command: string; file?: string; options: CliOptions } {
+  const options: CliOptions = {};
+  let command = 'help';
+  let file: string | undefined;
+  
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    if (arg === '--output' || arg === '-o') {
+      options.output = args[++i];
+    } else if (arg === '--max-parallel') {
+      options.maxParallel = parseInt(args[++i], 10);
+    } else if (arg === '--max-retries') {
+      options.maxRetries = parseInt(args[++i], 10);
+    } else if (arg === '--max-depth') {
+      options.maxDepth = parseInt(args[++i], 10);
+    } else if (!arg.startsWith('-')) {
+      if (!command || command === 'help') {
+        command = arg;
+      } else if (!file) {
+        file = arg;
+      }
+    } else if (arg === 'help' || arg === '--help' || arg === '-h') {
+      command = 'help';
+    }
+  }
+  
+  return { command, file, options };
+}
+
+/**
+ * Get the next available output directory
+ */
+function getNextOutputDir(): string {
+  let n = 0;
+  while (fs.existsSync(`/tmp/aidef-${n}`)) {
+    n++;
+  }
+  return `/tmp/aidef-${n}`;
+}
+
 async function main() {
-  const args = process.argv.slice(2);
-  const command = args[0];
+  const { command, file, options } = parseArgs(process.argv.slice(2));
 
   // Get API key from environment
   const apiKey = process.env.GEMINI_API_KEY;
 
   switch (command) {
-    case 'compile':
-    case '--compile': {
-      const rootFile = args[1] || 'root.aid';
-      await compile(rootFile, apiKey);
+    case 'compile': {
+      const rootFile = file || 'root.aid';
+      const outputDir = options.output || getNextOutputDir();
+      await compile(rootFile, outputDir, apiKey);
       break;
     }
 
-    case 'run':
-    case '--run': {
-      await run(apiKey);
+    case 'run': {
+      if (!options.output) {
+        console.error('Error: --output required for run command');
+        console.log('Usage: aidef run --output <dir>');
+        process.exit(1);
+      }
+      await run(options.output, apiKey);
       break;
     }
 
     case 'analyse':
-    case '--analyse':
-    case 'analyze':
-    case '--analyze': {
+    case 'analyze': {
+      if (!options.output) {
+        console.error('Error: --output required for analyse command');
+        console.log('Usage: aidef analyse --output <dir>');
+        process.exit(1);
+      }
       console.log('Analysis not yet implemented.');
       console.log('This will analyze the compiled plan and suggest improvements.');
       break;
     }
 
-    case 'browse':
-    case '--browse': {
+    case 'browse': {
+      if (!options.output) {
+        console.error('Error: --output required for browse command');
+        console.log('Usage: aidef browse --output <dir>');
+        process.exit(1);
+      }
       console.log('Browse TUI not yet implemented.');
       console.log('This will provide an interactive interface to explore the plan.');
       break;
     }
 
     case 'help':
-    case '--help':
-    case '-h':
     default: {
       printHelp();
       break;
@@ -64,20 +124,21 @@ async function main() {
 /**
  * Compile .aid files into execution plan
  */
-async function compile(rootFile: string, apiKey?: string): Promise<void> {
+async function compile(rootFile: string, outputDir: string, apiKey?: string): Promise<void> {
   console.log('=== AIDef Compilation ===\n');
+  console.log(`Output directory: ${outputDir}\n`);
 
-  // Step 1: Human compilation (resolve includes)
+  // Step 1: Resolver phase (resolve includes)
   console.log('Phase 1: Resolving includes...');
-  const humanCompiler = new HumanCompiler();
-  const genAidPath = await humanCompiler.compile(rootFile);
+  const resolver = new HumanCompiler(outputDir);
+  const genAidPath = await resolver.compile(rootFile);
   console.log();
 
-  // Step 2: Gen compilation (LLM processing)
+  // Step 2: Compiler phase (LLM processing)
   if (apiKey) {
     console.log('Phase 2: LLM compilation...');
-    const genCompiler = new GenCompiler(apiKey);
-    await genCompiler.compile(genAidPath);
+    const compiler = new GenCompiler(apiKey);
+    await compiler.compile(genAidPath);
     console.log();
   } else {
     console.log('Phase 2: Skipped (no GEMINI_API_KEY)');
@@ -86,15 +147,17 @@ async function compile(rootFile: string, apiKey?: string): Promise<void> {
   }
 
   console.log('=== Compilation Complete ===');
+  console.log(`Output directory: ${outputDir}`);
   console.log(`Entry point: ${genAidPath}`);
-  console.log('Run "aidef run" to execute the plan.');
+  console.log(`Run "aidef run --output ${outputDir}" to execute the plan.`);
 }
 
 /**
  * Run the compiled execution plan
  */
-async function run(apiKey?: string): Promise<void> {
+async function run(outputDir: string, apiKey?: string): Promise<void> {
   console.log('=== AIDef Runtime ===\n');
+  console.log(`Output directory: ${outputDir}\n`);
 
   if (!apiKey) {
     console.error('Error: GEMINI_API_KEY required for runtime');
@@ -102,7 +165,7 @@ async function run(apiKey?: string): Promise<void> {
     process.exit(1);
   }
 
-  const runtime = new AidRuntime(apiKey);
+  const runtime = new AidRuntime(apiKey, outputDir);
   await runtime.run();
 
   console.log('\n=== Runtime Complete ===');
@@ -118,18 +181,25 @@ AIDef - AI Definition Language
 Usage: aidef <command> [options]
 
 Commands:
-  compile [file]   Compile .aid file (default: root.aid)
-  run              Execute the compiled plan
-  analyse          Analyze plan and suggest improvements
-  browse           Interactive TUI for exploring the plan
+  compile [file]           Compile .aid file (default: root.aid)
+  run --output <dir>       Execute the compiled plan
+  analyse --output <dir>   Analyze plan and suggest improvements
+  browse --output <dir>    Interactive TUI for exploring the plan
+
+Options:
+  --output, -o <dir>       Output directory (default: /tmp/aidef-<n>)
+  --max-parallel <num>     Max parallel LLM calls (default: 10)
+  --max-retries <num>      Max retries for failed LLM calls (default: 3)
+  --max-depth <num>        Max node depth during compilation (default: 5)
 
 Environment:
-  GEMINI_API_KEY   Required for LLM compilation and runtime
+  GEMINI_API_KEY           Required for LLM compilation and runtime
 
 Examples:
-  aidef compile              # Compile root.aid
-  aidef compile my-app.aid   # Compile custom file
-  aidef run                  # Execute the plan
+  aidef compile                           # Compile root.aid to /tmp/aidef-0
+  aidef compile --output /tmp/myproject   # Compile to specific directory
+  aidef compile my-app.aid                # Compile custom file
+  aidef run --output /tmp/aidef-0         # Execute the plan
 
 Documentation: https://github.com/towc/aidef
 `);

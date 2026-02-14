@@ -18,12 +18,14 @@ export class AidRuntime {
   private ai: GoogleGenAI | null = null;
   private logPath: string;
   private commandWhitelist: string[];
+  private outputDir: string;
 
-  constructor(apiKey?: string, additionalCommands: string[] = []) {
+  constructor(apiKey?: string, outputDir?: string, additionalCommands: string[] = []) {
     if (apiKey) {
       this.ai = new GoogleGenAI({ apiKey });
     }
-    this.logPath = path.join(process.cwd(), 'runtime.log.jsonl');
+    this.outputDir = outputDir || process.cwd();
+    this.logPath = path.join(this.outputDir, 'runtime.log.jsonl');
     this.commandWhitelist = [...DEFAULT_COMMAND_WHITELIST, ...additionalCommands];
   }
 
@@ -38,8 +40,8 @@ export class AidRuntime {
       fs.unlinkSync(this.logPath);
     }
 
-    // Find all leaf nodes
-    const leaves = this.findLeaves(process.cwd());
+    // Find all leaf nodes in output directory
+    const leaves = this.findLeaves(this.outputDir);
     console.log(`[runtime] Found ${leaves.length} leaf node(s)`);
 
     if (leaves.length === 0) {

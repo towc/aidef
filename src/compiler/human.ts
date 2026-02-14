@@ -15,9 +15,11 @@ import { AidNode } from '../types';
 export class HumanCompiler {
   private parser: AidParser;
   private visitedPaths: Set<string> = new Set();
+  private outputDir: string;
 
-  constructor() {
+  constructor(outputDir?: string) {
     this.parser = new AidParser();
+    this.outputDir = outputDir || process.cwd();
   }
 
   /**
@@ -25,16 +27,19 @@ export class HumanCompiler {
    * Returns the path to the generated node.gen.aid
    */
   async compile(rootPath: string): Promise<string> {
-    console.log(`[human] Compiling ${rootPath}`);
+    console.log(`[resolver] Compiling ${rootPath}`);
     
     const absolutePath = path.resolve(rootPath);
     const content = await this.resolveFile(absolutePath);
     
-    // Write to node.gen.aid in current directory
-    const outputPath = path.join(process.cwd(), 'node.gen.aid');
+    // Ensure output directory exists
+    fs.mkdirSync(this.outputDir, { recursive: true });
+    
+    // Write to node.gen.aid in output directory
+    const outputPath = path.join(this.outputDir, 'node.gen.aid');
     fs.writeFileSync(outputPath, content, 'utf-8');
     
-    console.log(`[human] Generated ${outputPath}`);
+    console.log(`[resolver] Generated ${outputPath}`);
     return outputPath;
   }
 
@@ -44,7 +49,7 @@ export class HumanCompiler {
   private async resolveFile(filePath: string): Promise<string> {
     // Circular dependency check
     if (this.visitedPaths.has(filePath)) {
-      console.warn(`[human] Circular include detected: ${filePath}`);
+      console.warn(`[resolver] Circular include detected: ${filePath}`);
       return `# Circular include: ${filePath}\n`;
     }
     this.visitedPaths.add(filePath);
@@ -54,7 +59,7 @@ export class HumanCompiler {
     try {
       content = fs.readFileSync(filePath, 'utf-8');
     } catch (error) {
-      console.error(`[human] Failed to read ${filePath}:`, error);
+      console.error(`[resolver] Failed to read ${filePath}:`, error);
       this.visitedPaths.delete(filePath);
       return `# Failed to include: ${filePath}\n`;
     }
@@ -96,7 +101,7 @@ export class HumanCompiler {
   private async resolveInclude(includePath: string, basePath: string): Promise<AidNode[]> {
     // Handle HTTP includes
     if (includePath.startsWith('http://') || includePath.startsWith('https://')) {
-      console.warn(`[human] HTTP include not yet supported: ${includePath}`);
+      console.warn(`[resolver] HTTP include not yet supported: ${includePath}`);
       return [{ type: 'prose', text: `# TODO: HTTP include: ${includePath}` }];
     }
 
@@ -134,7 +139,7 @@ export class HumanCompiler {
         { type: 'prose', text: '```' },
       ];
     } catch (error) {
-      console.error(`[human] Failed to include non-.aid file ${filePath}:`, error);
+      console.error(`[resolver] Failed to include non-.aid file ${filePath}:`, error);
       return [{ type: 'prose', text: `# Failed to include: ${filePath}` }];
     }
   }
