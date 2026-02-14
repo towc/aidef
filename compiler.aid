@@ -153,10 +153,10 @@ compiler {
         The prompt includes the plan and interfaces from passes 1-2.
         
         IMPORTANT: Before calling the LLM, DETERMINISTICALLY extract expected modules from the .aid content.
-        Use a function extractTopLevelModules(content: string): string[] that finds all `name { }` blocks
+        Use a function extractTopLevelModules(content: string): string[] that finds all module blocks
         at the TOP LEVEL of the content (not nested inside other blocks). This is done by:
-        1. Remove code blocks (```...```) to avoid false positives
-        2. Find patterns matching `^\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\{` at the START of lines
+        1. Remove code blocks to avoid false positives
+        2. Find patterns like "identifier followed by opening brace" at the START of lines
         3. Track brace depth - only include modules where the opening brace is at depth 0
         4. Filter out common prose words (if, for, while, function, class, etc.)
         
