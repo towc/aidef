@@ -123,6 +123,7 @@ The prompt MUST include:
 - CONCRETE TypeScript interfaces (not abstract prose)
 - Behavioral requirements
 - PRE-EXISTING sibling imports if needed
+- TypeScript syntax rules (especially: use backticks for multi-line strings, NEVER single/double quotes)
 
 IMPORTANT: The prompt should NOT mention full paths like "Create src/compiler/index.ts".
 The outputPath already specifies where files go. Just describe what the file should contain.

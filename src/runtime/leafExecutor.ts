@@ -102,6 +102,27 @@ export async function executeLeaf(leaf: GenLeaf, apiKey: string, outputDir: stri
     const fileList = leaf.files.map(f => `- ${f}`).join('\n');
     const prompt = `${leaf.prompt}
 
+## CRITICAL TypeScript Syntax Rules
+
+When writing TypeScript/JavaScript code, you MUST follow these rules:
+
+1. **Multi-line strings**: NEVER use single quotes (') or double quotes (") for strings that span multiple lines. 
+   Use template literals (backticks \`) instead.
+   
+   WRONG (will cause syntax errors):
+   console.log('line 1
+   line 2');
+   
+   CORRECT:
+   console.log(\`line 1
+   line 2\`);
+
+2. **String escaping**: If you need literal backticks inside a template literal, escape them with backslash.
+
+3. **Import syntax**: Use 'import type' for type-only imports when using verbatimModuleSyntax.
+
+4. **Bun APIs**: Use Bun.file() for file operations, Bun.spawn() for processes.
+
 Files to create:
 ${fileList}
 
