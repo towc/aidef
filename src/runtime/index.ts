@@ -220,20 +220,44 @@ CRITICAL: DO NOT DIVERGE FROM THE PROMPT INSTRUCTIONS.
 - NEVER use GoogleGenerativeAI - the correct class name is GoogleGenAI
 
 IMPORTANT: When writing file content, use normal quotes. Do NOT escape single quotes as \\' or double quotes as \\".
-Write valid TypeScript/JavaScript code with proper string syntax.`;
+Write valid TypeScript/JavaScript code with proper string syntax.
+
+## CRITICAL TypeScript Syntax Rules
+
+When writing TypeScript/JavaScript code, you MUST follow these rules:
+
+1. **Multi-line strings**: NEVER use single quotes (') or double quotes (") for strings that span multiple lines. 
+   Use template literals (backticks \`) instead.
+   
+   WRONG (will cause syntax errors):
+   console.log('line 1
+   line 2');
+   
+   CORRECT:
+   console.log(\`line 1
+   line 2\`);
+
+2. **String escaping**: If you need literal backticks inside a template literal, escape them with backslash.
+
+3. **Import syntax**: Use 'import type' for type-only imports when using verbatimModuleSyntax.
+
+4. **Bun APIs**: Use Bun.file() for file operations, Bun.spawn() for processes.`;
 
     try {
-      const chat = this.ai.chats.create({
-        model: 'gemini-2.5-flash',
-        config: {
-          systemInstruction: systemPrompt,
-          tools: [{ functionDeclarations: tools }],
-          temperature: 0
-        }
-      });
+      // CORRECT API PATTERN: use models.generateContent with conversation history
+      const history: Array<{role: 'user' | 'model' | 'function', parts: Array<any>}> = [];
 
-      let response = await chat.sendMessage({
-        message: leaf.prompt
+      // Initial user message with system prompt as preamble
+      const fullPrompt = `${systemPrompt}\n\n---\n\n${leaf.prompt}`;
+      history.push({ role: 'user', parts: [{ text: fullPrompt }] });
+
+      let response = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: history,
+        config: {
+          temperature: 0,
+          tools: [{ functionDeclarations: tools }]
+        }
       });
 
       // Track which files we've written
@@ -249,18 +273,23 @@ Write valid TypeScript/JavaScript code with proper string syntax.`;
           break;
         }
 
-        const functionResponses = [];
+        // Add model response to history
+        history.push({
+          role: 'model',
+          parts: functionCalls.map(fc => ({ functionCall: { name: fc.name, args: fc.args } }))
+        });
+
+        const functionResponses: Array<{functionResponse: {name: string, response: any}}> = [];
 
         for (const call of functionCalls) {
           if (call.name === 'write_file') {
-            const filePath = call.args.path as string;
-            const content = call.args.content as string;
+            const filePath = call.args?.path as string;
+            const content = call.args?.content as string;
 
             // Security: validate path
-            if (filePath.includes('..') || path.isAbsolute(filePath)) {
+            if (!filePath || filePath.includes('..') || path.isAbsolute(filePath)) {
               functionResponses.push({
-                name: call.name,
-                response: { error: 'Invalid path' }
+                functionResponse: { name: call.name, response: { error: 'Invalid path' } }
               });
               continue;
             }
@@ -293,8 +322,7 @@ Write valid TypeScript/JavaScript code with proper string syntax.`;
             });
 
             functionResponses.push({
-              name: call.name,
-              response: { success: true, path: filePath }
+              functionResponse: { name: call.name, response: { success: true, path: filePath } }
             });
           }
         }
@@ -303,13 +331,17 @@ Write valid TypeScript/JavaScript code with proper string syntax.`;
           break;
         }
 
-        response = await chat.sendMessage({
-          message: functionResponses.map(fr => ({
-            functionResponse: {
-              name: fr.name,
-              response: fr.response
-            }
-          }))
+        // Add function responses to history
+        history.push({ role: 'function', parts: functionResponses });
+
+        // Continue conversation
+        response = await this.ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: history,
+          config: {
+            temperature: 0,
+            tools: [{ functionDeclarations: tools }]
+          }
         });
       }
 
