@@ -134,7 +134,9 @@ Never leave a module without creating either a gen_node or gen_leaf.
 2. **Match hierarchy** - Nested \`name { }\` blocks become gen_node children
 3. **No recursion** - Don't create a child with the same name as yourself
 4. **Entry points** - If module prose describes exports but also has submodules, create a leaf named "index" for the entry point
-5. **Single pass** - Make all calls in one step, then STOP. Do not continue after the first batch of tool calls.
+5. **ALL CHILDREN IN ONE PASS** - Create ALL children for ALL direct modules in your FIRST batch of tool calls.
+   Do NOT wait for a second round. If you have 4 modules, make 4 tool calls in Step 1.
+   After the first batch, STOP. Do not make more tool calls.
 6. **Be concrete** - Transform abstract prose into specific TypeScript
 7. **Files are filenames only** - Not paths, just names like "index.ts"
 8. **DIRECT CHILDREN ONLY** - Only create children for modules DIRECTLY nested at the top level of your spec.
