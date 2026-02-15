@@ -12,21 +12,27 @@ import { GoogleGenAI, Type } from '@google/genai';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
-import { GenLeaf, DEFAULT_COMMAND_WHITELIST, LogEntry } from '../types';
+import { DEFAULT_COMMAND_WHITELIST } from '../types';
+import type { GenLeaf, LogEntry } from '../types';
 
 export class AidRuntime {
   private ai: GoogleGenAI | null = null;
   private logPath: string;
   private commandWhitelist: string[];
   private outputDir: string;
+  private maxParallel: number;
+  private maxRetries: number;
+  private rateLimitStats = { totalRequests: 0, total429s: 0, totalWaitMs: 0 };
 
-  constructor(apiKey?: string, outputDir?: string, additionalCommands: string[] = []) {
+  constructor(apiKey?: string, outputDir?: string, additionalCommands: string[] = [], config?: RuntimeConfig) {
     if (apiKey) {
       this.ai = new GoogleGenAI({ apiKey });
     }
     this.outputDir = outputDir || process.cwd();
     this.logPath = path.join(this.outputDir, 'runtime.log.jsonl');
     this.commandWhitelist = [...DEFAULT_COMMAND_WHITELIST, ...additionalCommands];
+    this.maxParallel = config?.maxParallel || 10;
+    this.maxRetries = config?.maxRetries || 5;
   }
 
   /**
@@ -49,9 +55,10 @@ export class AidRuntime {
       return;
     }
 
-    // Execute leaves in parallel
-    const results = await Promise.allSettled(
-      leaves.map(leaf => this.executeLeaf(leaf))
+    // Execute leaves with concurrency limit
+    const results = await this.runWithConcurrency(
+      leaves.map(leaf => () => this.executeLeaf(leaf)),
+      this.maxParallel
     );
 
     // Summary
@@ -59,7 +66,43 @@ export class AidRuntime {
     const failed = results.filter(r => r.status === 'rejected').length;
     
     console.log(`[runtime] Complete: ${succeeded} succeeded, ${failed} failed`);
+    if (this.rateLimitStats.total429s > 0) {
+      console.log(`[runtime] Rate limits: ${this.rateLimitStats.total429s} retries, ${Math.round(this.rateLimitStats.totalWaitMs / 1000)}s total wait`);
+    }
     console.log(`[runtime] Log: ${this.logPath}`);
+
+    this.log({
+      timestamp: new Date().toISOString(),
+      type: 'summary',
+      details: { succeeded, failed, rateLimitStats: this.rateLimitStats }
+    });
+  }
+
+  /**
+   * Run tasks with concurrency limit
+   */
+  private async runWithConcurrency(
+    tasks: Array<() => Promise<void>>,
+    maxConcurrent: number
+  ): Promise<PromiseSettledResult<void>[]> {
+    const results: PromiseSettledResult<void>[] = [];
+    let index = 0;
+
+    async function runNext(): Promise<void> {
+      while (index < tasks.length) {
+        const currentIndex = index++;
+        try {
+          await tasks[currentIndex]();
+          results[currentIndex] = { status: 'fulfilled', value: undefined };
+        } catch (error) {
+          results[currentIndex] = { status: 'rejected', reason: error };
+        }
+      }
+    }
+
+    const workers = Array.from({ length: Math.min(maxConcurrent, tasks.length) }, () => runNext());
+    await Promise.all(workers);
+    return results;
   }
 
   /**
@@ -262,14 +305,7 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
       const fullPrompt = `${systemPrompt}\n\n---\n\n${leaf.prompt}`;
       history.push({ role: 'user', parts: [{ text: fullPrompt }] });
 
-      let response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: history,
-        config: {
-          temperature: 0,
-          tools: [{ functionDeclarations: tools }]
-        }
-      });
+      let response = await this.callWithRetry(history, tools);
 
       // Track which files we've written
       const writtenFiles = new Set<string>();
@@ -295,14 +331,7 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
           const nudge = `You MUST use the write_file tool to create these files: ${missingFiles.join(', ')}. Please call write_file now.`;
           history.push({ role: 'user', parts: [{ text: nudge }] });
           
-          response = await this.ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: history,
-            config: {
-              temperature: 0,
-              tools: [{ functionDeclarations: tools }]
-            }
-          });
+          response = await this.callWithRetry(history, tools);
           continue;
         }
 
@@ -368,14 +397,7 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
         history.push({ role: 'function', parts: functionResponses });
 
         // Continue conversation
-        response = await this.ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: history,
-          config: {
-            temperature: 0,
-            tools: [{ functionDeclarations: tools }]
-          }
-        });
+        response = await this.callWithRetry(history, tools);
       }
 
       // Check if all required files were written
@@ -404,6 +426,43 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
         details: { error: String(error) }
       });
     }
+  }
+
+  /**
+   * Call LLM with automatic 429 retry and backoff
+   */
+  private async callWithRetry(history: Array<any>, tools: any[]): Promise<any> {
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        this.rateLimitStats.totalRequests++;
+        return await this.ai!.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: history,
+          config: {
+            temperature: 0,
+            tools: [{ functionDeclarations: tools }]
+          }
+        });
+      } catch (err: any) {
+        if (err?.status === 429 && attempt < this.maxRetries - 1) {
+          this.rateLimitStats.total429s++;
+          const retryMatch = String(err).match(/retry.*?(\d+(?:\.\d+)?)s/i);
+          const waitSec = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) + 5 : 45;
+          const waitMs = waitSec * 1000;
+          this.rateLimitStats.totalWaitMs += waitMs;
+          console.log(`[runtime] Rate limited, waiting ${waitSec}s (attempt ${attempt + 1}/${this.maxRetries})...`);
+          this.log({
+            timestamp: new Date().toISOString(),
+            type: 'rate_limit' as any,
+            details: { attempt: attempt + 1, waitSec }
+          });
+          await new Promise(r => setTimeout(r, waitMs));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error(`Failed after ${this.maxRetries} retries`);
   }
 
   /**
@@ -470,7 +529,7 @@ export async function run(outputDir: string, apiKey: string, config?: RuntimeCon
     console.log(`[runtime] Max retries: ${config.maxRetries}`);
   }
 
-  const runtime = new AidRuntime(apiKey, outputDir);
+  const runtime = new AidRuntime(apiKey, outputDir, [], config);
   await runtime.run();
 }
 
