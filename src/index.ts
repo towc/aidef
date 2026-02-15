@@ -3,6 +3,8 @@ import { Command } from 'commander';
 import { compile } from './compiler';
 import { run } from './runtime';
 import { extract } from './extract';
+import { analyse } from './analyse';
+import { browse } from './browse';
 
 const program = new Command();
 
@@ -81,20 +83,32 @@ program
     }
   });
 
-// Analyse command (not yet implemented)
+// Analyse command
 program
   .command('analyse')
-  .description('Analyse the project (not yet implemented)')
-  .action(() => {
-    console.log('Analyse command is not yet implemented.');
+  .description('Analyse the compiled plan and AI call logs')
+  .action(async () => {
+    const opts = program.opts();
+    try {
+      await analyse({ output: opts.output, apiKey: GEMINI_API_KEY });
+    } catch (error) {
+      console.error('Analysis failed:', error);
+      process.exit(1);
+    }
   });
 
-// Browse command (not yet implemented)
+// Browse command
 program
   .command('browse')
-  .description('Browse the project (not yet implemented)')
-  .action(() => {
-    console.log('Browse command is not yet implemented.');
+  .description('TUI to inspect plan files and analysis output')
+  .action(async () => {
+    const opts = program.opts();
+    try {
+      await browse({ output: opts.output, apiKey: GEMINI_API_KEY });
+    } catch (error) {
+      console.error('Browse failed:', error);
+      process.exit(1);
+    }
   });
 
-program.parse(process.argv);
+program.parseAsync(process.argv);
