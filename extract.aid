@@ -1,0 +1,134 @@
+extract {
+  path=src/extract;
+
+  Reverse-engineers existing code into .aid specification files.
+  This is the inverse of compilation: code -> .aid, enabling migration of existing projects to aidef.
+
+  The extract function takes a path (file or directory), analyzes the code, and produces a sensible
+  root.aid plus any included .aid files that describe the project at an abstract level.
+
+  The goal is NOT to reproduce the code literally - it is to capture the INTENT and ARCHITECTURE
+  at the right level of abstraction for .aid files. Think of it as a senior developer reading a
+  codebase and writing a high-level specification document.
+
+  CRITICAL CODE GENERATION RULES (applies to ALL modules in extract):
+  - NEVER use ambient declarations like "export const X: Type;" or "export function f(): void;"
+  - Ambient declarations are for .d.ts files only, NOT implementation files
+  - When you import something, use it directly - do NOT re-export or redeclare it
+  - Only declare/export things you are IMPLEMENTING in this file
+  - If a function uses "await", it MUST be declared with "async"
+  - If a function returns Promise, it MUST be declared with "async"
+
+  File system operations: use fs from 'node:fs/promises' for mkdir, readdir, stat, etc.
+  Do NOT use Bun.mkdir or other non-existent Bun APIs.
+  Use Bun.file() for reading files, and Bun.write() for writing files.
+  Use fs.mkdir(path, { recursive: true }) for creating directories.
+
+  Uses Google Gemini via @google/genai package (GoogleGenAI class, NOT @google/generative-ai).
+
+  CRITICAL API PATTERN - use EXACTLY this code:
+  ```typescript
+  import { GoogleGenAI } from '@google/genai';
+  const genai = new GoogleGenAI({ apiKey });
+  const response = await genai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: { temperature: 0 }
+  });
+  const text = response.text;
+  ```
+  NEVER use getGenerativeModel(), model.startChat(), or @google/generative-ai patterns.
+
+  Creates index.ts which exports an extract function:
+    export async function extract(targetPath: string, outputFile: string, apiKey: string): Promise<void>
+
+  The extract function:
+    1. Calls the scanner to collect the project file tree
+    2. Calls the analyzer to understand the project structure using LLM
+    3. Calls the generator to produce .aid files
+    4. Writes the output
+
+  scanner {
+    Deterministic file scanner. No LLM involved.
+    Creates scanner.ts.
+
+    Recursively walks a directory (or reads a single file) and collects file metadata and contents.
+    Respects .gitignore if present. Skips common non-source directories (node_modules, .git, dist, build, coverage, __pycache__, .next, etc.).
+
+    Exports:
+      - interface ProjectFile with fields: relativePath (string), content (string), extension (string), sizeBytes (number)
+      - interface ScanResult with fields: rootPath (string), files (ProjectFile[]), totalFiles (number), totalBytes (number)
+      - async function scan(targetPath: string): Promise<ScanResult>
+
+    Implementation:
+      - If targetPath is a file, return a ScanResult with just that file
+      - If targetPath is a directory, recursively walk it
+      - Read file contents as utf-8 text, skip binary files (detect by checking for null bytes in first 512 bytes)
+      - Skip files larger than 100KB to avoid overwhelming the LLM context
+      - Use Bun.file() to read files, node:fs/promises for directory operations
+  }
+
+  analyzer {
+    LLM-powered project analysis. Uses Google Gemini.
+    Creates analyzer.ts.
+
+    Takes the scan result and asks the LLM to understand the project structure, identifying:
+      - What the project does (purpose, domain)
+      - What language/runtime it targets
+      - The module hierarchy (which directories/files form logical modules)
+      - Key interfaces and contracts between modules
+      - External dependencies and their roles
+      - Configuration patterns
+
+    Uses Google Gemini via @google/genai package (GoogleGenAI class).
+    CRITICAL API PATTERN - use EXACTLY the same pattern as described in the parent spec.
+
+    Exports:
+      - interface ModuleInfo with fields: name (string), path (string), description (string), children (ModuleInfo[]), keyExports (string[])
+      - interface ProjectAnalysis with fields: projectName (string), description (string), language (string), runtime (string), modules (ModuleInfo[]), dependencies (string[])
+      - async function analyze(scanResult: ScanResult, apiKey: string): Promise<ProjectAnalysis>
+
+    Implementation:
+      - Build a condensed summary of the project files (paths, sizes, first-line previews)
+      - Send the summary plus contents of key files (package.json, tsconfig.json, README, entry points) to the LLM
+      - Ask the LLM to produce a structured ProjectAnalysis
+      - For large projects, batch files into chunks to stay within context limits
+      - Use temperature=0 for consistent results
+      - Parse the LLM response as JSON (instruct it to respond in JSON format)
+
+    IMPORTANT: The analyzer should identify the NATURAL module boundaries in the code.
+    A module is a cohesive group of files that serve a single purpose.
+    Not every file is a module - files within a directory usually form one module together.
+  }
+
+  aidGenerator {
+    Converts a ProjectAnalysis into .aid file content. Uses LLM for prose generation.
+    Creates aidGenerator.ts.
+
+    Takes the structured ProjectAnalysis and generates well-formatted .aid content.
+    The output should follow .aid conventions:
+      - Top-level prose describing the project
+      - Module blocks for each logical module
+      - path= params setting output directories
+      - Prose inside modules describing what they do
+      - Nested module blocks for sub-modules
+      - Include statements when a module is complex enough to warrant its own .aid file
+
+    Uses Google Gemini via @google/genai package (GoogleGenAI class).
+    CRITICAL API PATTERN - use EXACTLY the same pattern as described in the parent spec.
+
+    Exports:
+      - interface AidOutput with fields: rootAid (string), includes (Map of filename to content)
+      - async function generateAid(analysis: ProjectAnalysis, scanResult: ScanResult, apiKey: string): Promise<AidOutput>
+
+    Implementation:
+      - For small projects (fewer than 5 modules), generate a single root.aid
+      - For larger projects, split into root.aid plus include files (one per major module)
+      - The LLM should write the .aid prose - it should be abstract and descriptive, NOT code
+      - Include enough detail that a different LLM could regenerate the project from the .aid files
+      - But keep it high-level: describe WHAT, not HOW (e.g. "parses JSON config files" not "uses JSON.parse on fs.readFileSync result")
+      - Preserve important specifics: package names, API patterns, model names, port numbers
+      - The generated .aid should use proper .aid syntax: module blocks, path= params, prose
+      - Use temperature=0.3 for slightly more natural prose while remaining deterministic
+  }
+}

@@ -1,101 +1,126 @@
-# AIDef Bootstrap
+# AIDef Bootstrap & Iterative Development
 
-## Overview
+## The Self-Hosting Problem
 
-The bootstrapper is a minimal CLI tool that can understand `.aid` files and generate code output. It exists to solve the chicken-and-egg problem: AIDef needs to be built before it can build itself.
+AIDef compiles `.aid` specs into code. AIDef itself is defined in `.aid` specs. This creates a chicken-and-egg problem: we need a working compiler to compile the compiler.
 
-The bootstrapper is intentionally simple:
-- No parsing of `.aid` syntax (the LLM understands it directly)
-- No complex orchestration or parallelization
-- LLM uses tools to read files and write output
-- Outputs generated code to `src/`
+## Solution: Iterative Bootstrapping
 
-## How It Works
+We maintain a **working build** that can compile `.aid` files. Each iteration:
+
+1. **Edit `.aid` specs** - change the source of truth
+2. **Compile** - use the current working build to compile the updated specs
+3. **Build** - run the compiled plan to generate code via LLM
+4. **Fix** - manually patch any generated code issues
+5. **Test** - verify the new build works (CLI, compile, run, extract)
+6. **Promote** - if it works, this becomes the new working build
 
 ```
-root.aid → Bootstrapper → LLM (with tools) → src/
+.aid files ──► working build (compile) ──► plan ──► working build (run) ──► generated code
+                    ▲                                                            │
+                    │                    fix + test                              │
+                    └───────────────────────────────────────────────────────────┘
 ```
 
-1. **Start**: Send `root.aid` content to LLM with system prompt
-2. **Read**: LLM uses `read_file` tool to read included files as needed
-3. **Generate**: LLM produces code based on the specification
-4. **Write**: LLM uses `write_file` tool to save files (restricted to `src/`)
+## Working Build Location
 
-## Tools
+The working build lives in `src/` and is committed to git. It's a mix of:
+- **Generated code** from previous compile+build cycles
+- **Manual patches** to fix LLM-generated issues
+- **Bootstrap code** from the original hand-written implementation
 
-The LLM has access to two tools:
+Over time, the proportion of generated vs hand-written code should increase as the specs and prompts improve.
 
-### `read_file`
-- **Purpose**: Read `.aid` files or other referenced files
-- **Input**: `{ path: string }` - relative path from project root
-- **Output**: File contents as string
-- **No restrictions**: Can read any file in the project
+## Build Output Location
 
-### `write_file`
-- **Purpose**: Write generated code files
-- **Input**: `{ path: string, content: string }`
-- **Output**: Confirmation
-- **Restricted to `src/`**: Path must start with `src/`
+Each compile produces output in `/tmp/aidef-<timestamp>/`. The structure is:
 
-## The System Prompt
+```
+/tmp/aidef-<timestamp>/
+├── root.resolved.aid          # Resolved spec (includes inlined)
+├── compile.log.jsonl          # Compilation log
+├── compiler/                  # Compiler node + child leaves
+│   ├── node.gen.aid
+│   ├── parser/leaf.gen.aid.leaf.json
+│   ├── resolver/leaf.gen.aid.leaf.json
+│   └── ...
+├── runtime/                   # Runtime node + child leaves
+├── extract/                   # Extract node + child leaves
+├── cli/                       # CLI node + child leaves
+└── src/                       # Generated code (after `run`)
+    ├── index.ts
+    ├── compiler/
+    ├── runtime/
+    └── extract/
+```
 
-The system prompt teaches the LLM:
-- What `.aid` files are (specifications for code generation)
-- The minimal syntax (module blocks, includes, prose)
-- How to use the read/write tools
-- That output must go to `src/`
+## Common Issues in Generated Code
 
-The actual `.aid` language definition lives in `root.aid` itself - the bootstrapper's system prompt is just enough to get started.
+The LLM frequently produces these errors that need manual patching:
 
-## CLI Usage
+| Issue | Symptom | Fix |
+|-------|---------|-----|
+| Ambient declarations | `export const X: Type;` without value | Remove the declaration, just use imports |
+| Missing `async` | `function f(): Promise<void>` without `async` | Add `async` keyword |
+| Wrong Bun APIs | `Bun.mkdir()` (doesn't exist) | Use `fs.mkdirSync()` from `node:fs` |
+| Import redeclaration | Import `Foo` then also `interface Foo {}` | Remove the local redeclaration |
+| Syntax errors | Mismatched brackets in tool configs | Fix bracket nesting manually |
+| Missing files | LLM returns text instead of tool call | Retry logic nudges LLM to use tools |
+| Escaped strings | `\\n` instead of `\n` in regex | Fix escaping |
+
+These are tracked and fed back into the `.aid` specs as explicit rules (see the `CRITICAL CODE GENERATION RULES` sections in `compiler.aid` and `runtime.aid`).
+
+## Promoting a Build
+
+When a build in `/tmp/aidef-<timestamp>/src/` passes testing:
+
+1. Copy generated files over `src/` (preserving `.git`)
+2. Apply any manual patches
+3. Test: `bun src/index.ts --help`
+4. Test: `bun src/index.ts compile root.aid -o /tmp/test`
+5. Test: `bun src/index.ts run -o /tmp/test`
+6. Commit
+
+It's acceptable to cherry-pick: copy only the modules that improved, keeping bootstrap code for modules that regressed.
+
+## Current State
+
+The working build in `src/` uses:
+- **Bootstrap compiler** (`src/compiler/`) - mostly hand-written, proven reliable
+- **Bootstrap runtime** (`src/runtime/`) - hand-written, has retry logic for missing files
+- **Generated extract** (`src/extract/`) - LLM-generated, first iteration
+- **Hand-written CLI** (`src/index.ts`) - manually maintained entry point
+
+The compiler and runtime are the hardest to self-host because:
+- `gen.ts` is the most complex module (multi-pass LLM compilation with tool calling)
+- The runtime needs to correctly handle LLM function calling, retries, and file I/O
+- Both modules define how the LLM should behave, creating a meta-level complexity
+
+## Development Workflow
 
 ```bash
-# Run the bootstrapper on root.aid
-bun run bootstrap.ts
+# 1. Edit .aid specs
+vim compiler.aid  # or runtime.aid, extract.aid, root.aid
 
-# Or with a specific file
-bun run bootstrap.ts path/to/spec.aid
+# 2. Compile with current working build
+bun src/index.ts compile root.aid -o /tmp/aidef-new
+
+# 3. Build (generate code from leaves)
+bun src/index.ts run -o /tmp/aidef-new
+
+# 4. Install deps in output
+cd /tmp/aidef-new && bun add commander @google/genai
+
+# 5. Test
+bun src/index.ts --help
+bun src/index.ts compile root.aid -o /tmp/aidef-test
+
+# 6. If it works, promote
+cp -r /tmp/aidef-new/src/* /path/to/repo/src/
+# Apply patches if needed
+# Commit
 ```
 
-## Output
+## Goal
 
-The bootstrapper writes files to `src/`:
-
-```
-src/
-├── index.ts
-├── parser/
-│   └── ...
-├── compiler/
-│   └── ...
-└── cli/
-    └── ...
-```
-
-## Limitations
-
-The bootstrapper is intentionally limited:
-- No incremental builds (regenerates everything)
-- No caching
-- No parallel compilation
-
-These features will exist in the full AIDef implementation (which will be generated from `root.aid` using this bootstrapper).
-
-## Implementation
-
-The bootstrapper is a single TypeScript file: `bootstrap.ts`
-
-Dependencies:
-- Bun runtime
-- Vercel AI SDK (`ai` package)
-- An LLM provider (Gemini, Anthropic, or OpenAI)
-
-## Environment Variables
-
-```
-GEMINI_API_KEY=...    # For Google Gemini
-ANTHROPIC_API_KEY=... # For Anthropic Claude  
-OPENAI_API_KEY=...    # For OpenAI GPT
-```
-
-The bootstrapper uses whichever key is available, preferring in the order listed.
+Full self-hosting: the generated code should compile itself without manual patches. We're not there yet, but each iteration improves the specs and reduces the patch surface.
