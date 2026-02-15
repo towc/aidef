@@ -52,6 +52,8 @@ cli {
     --max-parallel limits concurrent LLM calls (default: 10)
     --max-retries for failed LLM calls (default: 3)
     --max-depth for compilation tree (default: 5)
+    --tokens-per-minute limits token throughput to stay under provider quota (default: none, no throttling)
+    --requests-per-minute limits request rate to stay under provider quota (default: none, no throttling)
   
   CRITICAL: Options are GLOBAL, not per-command. Inside action callbacks, use program.opts() to access them:
     const opts = program.opts();

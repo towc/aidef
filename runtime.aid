@@ -16,7 +16,33 @@ runtime {
     JSON files get no header since JSON doesn't support comments.
     The source.aid path comes from the leaf's sourceAid field.
   
-  Creates index.ts which exports a run function that takes outputDir and apiKey.
+  Rate limiting and throttling:
+    LLM providers have rate limits (tokens per minute, requests per minute).
+    The runtime MUST handle 429 (rate limit) errors gracefully:
+    1. Parse the retry delay from the error response (look for "retry.*(\d+)s" pattern)
+    2. Wait the suggested delay plus a 5-second buffer
+    3. Retry up to maxRetries times before failing the leaf
+    4. Log every rate limit event with wait time and attempt number
+    
+    The runtime accepts a RateLimitConfig to enable proactive throttling:
+    ```typescript
+    export interface RateLimitConfig {
+      tokensPerMinute?: number;   // e.g. 1000000 for Gemini 2.5 Flash
+      requestsPerMinute?: number; // e.g. 1000 for Gemini 2.5 Flash
+    }
+    ```
+    If provided, the runtime tracks token usage estimates and request counts,
+    and delays requests proactively to stay under limits.
+    
+    After execution completes, the runtime writes a rate-limit summary to the log:
+    - Total requests made
+    - Total 429 errors encountered
+    - Total time spent waiting on rate limits
+    - Peak tokens/minute observed (estimated from prompt sizes)
+    This helps users tune --max-parallel and understand their quota usage.
+  
+  Creates index.ts which exports a run function that takes outputDir, apiKey, and optional config.
+  The config includes maxParallel, maxRetries, and rateLimits (RateLimitConfig).
   Finds all leaf.json files, executes them in parallel with progress reporting.
   
   CRITICAL CODE GENERATION RULES (applies to ALL modules in runtime):
@@ -42,6 +68,13 @@ runtime {
     Maintains conversation history for multi-turn.
     Continues until all files in the leaf are written.
     Logs each file write to the logger.
+    
+    MUST handle 429 rate limit errors with retry and backoff:
+    - Catch errors where status === 429
+    - Parse retry delay from error message (pattern: "retry.*(\d+(?:\.\d+)?)s")
+    - Wait the parsed delay + 5 second buffer
+    - Retry up to maxRetries times
+    - Log each retry attempt with wait time
     
     CRITICAL API PATTERN - use EXACTLY this code:
     ```typescript
@@ -95,7 +128,7 @@ runtime {
     ```typescript
     export interface LogEntry {
       timestamp: string;
-      type: 'ai_call' | 'command_execution' | 'file_write' | 'error';
+      type: 'ai_call' | 'command_execution' | 'file_write' | 'error' | 'rate_limit' | 'summary';
       leafPath: string;
       details: any;
     }
@@ -110,7 +143,8 @@ runtime {
     Implementation:
       - createLogger MUST ensure parent directory of logFilePath exists before writing
       - Use fs.mkdirSync(dirname(logFilePath), { recursive: true }) from 'node:fs' and 'node:path'
-      - Then use Bun.write(filePath, logLine, { append: true }) for appending
-      - log() adds timestamp and writes JSON line to the file
+      - Use fs.appendFileSync(filePath, logLine) from 'node:fs' for appending
+      - Do NOT use Bun.write with append option - it does not exist
+      - log() is synchronous - adds timestamp and writes JSON line to the file
   }
 }
