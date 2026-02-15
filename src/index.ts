@@ -2,10 +2,10 @@
 import { Command } from 'commander';
 import { compile } from './compiler';
 import { run } from './runtime';
+import { extract } from './extract';
 
 const program = new Command();
 
-// Get GEMINI_API_KEY
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 if (!GEMINI_API_KEY) {
   console.error('Error: GEMINI_API_KEY is not set. Please set the environment variable.');
@@ -22,10 +22,10 @@ program
 // Compile command
 program
   .command('compile [file]')
-  .description('Compile an AIDL file')
-  .argument('[file]', 'Root AIDL file to compile', 'root.aid')
+  .description('Compile an .aid file')
+  .argument('[file]', 'Root .aid file to compile', 'root.aid')
   .action(async (file) => {
-    const opts = program.opts(); // Get global options
+    const opts = program.opts();
     const outputDir = opts.output;
     console.log(`Compiling ${file} to ${outputDir}...`);
     console.log(`Max parallel: ${opts.maxParallel}, Max retries: ${opts.maxRetries}, Max depth: ${opts.maxDepth}`);
@@ -41,9 +41,9 @@ program
 // Run command
 program
   .command('run')
-  .description('Run the compiled AIDL output')
+  .description('Run the compiled output')
   .action(async () => {
-    const opts = program.opts(); // Get global options
+    const opts = program.opts();
     const outputDir = opts.output;
     console.log(`Running from ${outputDir}...`);
     try {
@@ -55,10 +55,27 @@ program
     }
   });
 
+// Extract command
+program
+  .command('extract <path>')
+  .description('Analyze existing code and generate .aid files from it')
+  .option('--out <file>', 'Output .aid file', 'root.aid')
+  .action(async (targetPath, cmdOpts) => {
+    const outputFile = cmdOpts.out;
+    console.log(`Extracting from ${targetPath} to ${outputFile}...`);
+    try {
+      await extract(targetPath, outputFile, GEMINI_API_KEY);
+      console.log(`Extraction complete. Generated ${outputFile}`);
+    } catch (error) {
+      console.error('Extraction failed:', error);
+      process.exit(1);
+    }
+  });
+
 // Analyse command (not yet implemented)
 program
   .command('analyse')
-  .description('Analyse the AIDL project (not yet implemented)')
+  .description('Analyse the project (not yet implemented)')
   .action(() => {
     console.log('Analyse command is not yet implemented.');
   });
@@ -66,7 +83,7 @@ program
 // Browse command (not yet implemented)
 program
   .command('browse')
-  .description('Browse the AIDL project (not yet implemented)')
+  .description('Browse the project (not yet implemented)')
   .action(() => {
     console.log('Browse command is not yet implemented.');
   });
