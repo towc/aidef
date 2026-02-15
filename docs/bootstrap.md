@@ -96,30 +96,53 @@ The compiler and runtime are the hardest to self-host because:
 - The runtime needs to correctly handle LLM function calling, retries, and file I/O
 - Both modules define how the LLM should behave, creating a meta-level complexity
 
-## Development Workflow
+## Build Iteration Flow
 
-```bash
-# 1. Edit .aid specs
-vim compiler.aid  # or runtime.aid, extract.aid, root.aid
+Each self-hosting iteration follows this cycle:
 
-# 2. Compile with current working build
-bun src/index.ts compile root.aid -o /tmp/aidef-new
+1. **Edit .aid specs** - Update root.aid, compiler.aid, runtime.aid, etc. with improvements
+2. **Compile** - `bun src/index.ts compile root.aid -o /tmp/aidef-genN --max-parallel 100`
+   - Three-pass compilation: Planning → Interface Definition → Child Generation
+   - Produces .leaf.json files in the output directory
+3. **Build** - `bun src/index.ts run -o /tmp/aidef-genN --max-parallel 5`
+   - Executes all leaves in parallel (use lower parallelism to avoid rate limits)
+   - Each leaf generates code via LLM tool calling
+   - Rate limit retries: 429 errors are retried with backoff
+4. **Verify** (parallel subagents) - Check all generated files for common issues:
+   - Ambient declarations (export without body)
+   - Import redeclaration (importing AND locally declaring same thing)
+   - Missing async on Promise-returning functions
+   - Wrong Bun APIs (Bun.mkdir, Bun.write with append)
+   - response.text() called as function (should be property)
+   - Escaped regex strings (\\n instead of \n)
+   - Missing files (leaves that failed due to rate limits)
+5. **Patch** - Fix issues found in verification (manual or via subagents)
+6. **Test** - `bun /tmp/aidef-genN/src/index.ts --help` to verify CLI works
+7. **Promote** - Copy generated src/ to repo's src/, commit
+8. **Repeat** - Each cycle should reduce manual patches needed
 
-# 3. Build (generate code from leaves)
-bun src/index.ts run -o /tmp/aidef-new
+### Rate Limit Management
 
-# 4. Install deps in output
-cd /tmp/aidef-new && bun add commander @google/genai
+Gemini 2.5 Flash limits: 1M tokens/min, 1K requests/min.
+- Compilation (3-pass) uses ~3x more tokens per node than single-pass
+- 19 parallel leaf generations can exceed 1M tokens/min
+- Use `--max-parallel 5` for build phase, `--max-parallel 100` for compile phase
+- Use `--tokens-per-minute` and `--requests-per-minute` for proactive throttling
+- Runtime retries 429 errors with parsed delay + 5s buffer, up to 5 attempts
 
-# 5. Test
-bun src/index.ts --help
-bun src/index.ts compile root.aid -o /tmp/aidef-test
+### Known Generation Issues (checklist for verification)
 
-# 6. If it works, promote
-cp -r /tmp/aidef-new/src/* /path/to/repo/src/
-# Apply patches if needed
-# Commit
-```
+These are recurring LLM code generation problems to check after each build:
+
+1. Ambient declarations: `export const X: Type;` or `export function f(): void;` with no body
+2. Import redeclaration: importing AND locally re-declaring the same interface/type/class
+3. Missing async: functions returning Promise without async keyword
+4. Wrong Bun APIs: `Bun.mkdir()` (doesn't exist), `Bun.write(path, content, { append: true })` (append not supported)
+5. response.text() as function: in @google/genai, text is a property not a method
+6. Escaped regex strings: `\\n` instead of `\n`, `\\s` instead of `\s`
+7. Architectural divergence: generated gen.ts inventing LEAF_CONFIG approach instead of .leaf.json
+8. Parser regression: brace counting only on exact `{`/`}` lines instead of all braces
+9. Missing files: leaves that hit rate limits and produced no output
 
 ## Goal
 

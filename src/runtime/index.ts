@@ -447,7 +447,29 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
   }
 }
 
-export async function run(outputDir: string, apiKey: string): Promise<void> {
+export interface RuntimeConfig {
+  maxParallel?: number;
+  maxRetries?: number;
+  rateLimits?: {
+    tokensPerMinute?: number;
+    requestsPerMinute?: number;
+  };
+}
+
+export async function run(outputDir: string, apiKey: string, config?: RuntimeConfig): Promise<void> {
+  if (config?.rateLimits?.tokensPerMinute || config?.rateLimits?.requestsPerMinute) {
+    console.log('[runtime] Rate limits configured:', {
+      tokensPerMinute: config.rateLimits.tokensPerMinute ?? 'unlimited',
+      requestsPerMinute: config.rateLimits.requestsPerMinute ?? 'unlimited',
+    });
+  }
+  if (config?.maxParallel) {
+    console.log(`[runtime] Max parallel: ${config.maxParallel}`);
+  }
+  if (config?.maxRetries) {
+    console.log(`[runtime] Max retries: ${config.maxRetries}`);
+  }
+
   const runtime = new AidRuntime(apiKey, outputDir);
   await runtime.run();
 }

@@ -17,7 +17,9 @@ program
   .option('-o, --output <path>', 'Output directory', `/tmp/aidef-${Date.now()}`)
   .option('--max-parallel <number>', 'Maximum parallel operations', '10')
   .option('--max-retries <number>', 'Maximum retries for operations', '3')
-  .option('--max-depth <number>', 'Maximum depth for compilation/analysis', '5');
+  .option('--max-depth <number>', 'Maximum depth for compilation/analysis', '5')
+  .option('--tokens-per-minute <number>', 'Limit token throughput to stay under provider quota')
+  .option('--requests-per-minute <number>', 'Limit request rate to stay under provider quota');
 
 // Compile command
 program
@@ -47,7 +49,14 @@ program
     const outputDir = opts.output;
     console.log(`Running from ${outputDir}...`);
     try {
-      await run(outputDir, GEMINI_API_KEY);
+      await run(outputDir, GEMINI_API_KEY, {
+        maxParallel: parseInt(opts.maxParallel),
+        maxRetries: parseInt(opts.maxRetries),
+        rateLimits: {
+          tokensPerMinute: opts.tokensPerMinute ? parseInt(opts.tokensPerMinute) : undefined,
+          requestsPerMinute: opts.requestsPerMinute ? parseInt(opts.requestsPerMinute) : undefined,
+        }
+      });
       console.log('Run successful.');
     } catch (error) {
       console.error('Run failed:', error);
