@@ -556,11 +556,11 @@ Export all public interfaces and functions as described.`;
   ): Promise<void> {
     // Try to find path= param in parent content
     const pathMatch = parentContent.match(/path=([^;\s]+)/);
-    const outputPath = pathMatch ? pathMatch[1] : 'src';
+    const outputPath = pathMatch?.[1] ?? 'src';
     
     // Try to infer source aid file
     const sourceAidMatch = parentContent.match(/from ([^\s]+\.aid)/);
-    const sourceAid = sourceAidMatch ? sourceAidMatch[1] : `${path.basename(parentDir)}.aid`;
+    const sourceAid = sourceAidMatch?.[1] ?? `${path.basename(parentDir)}.aid`;
     
     // Use the module content as the prompt
     const prompt = `Use Bun and TypeScript.
@@ -587,13 +587,26 @@ Export all public interfaces and functions as described.`;
       commands: []
     };
 
+    // Check for file collisions before creating
+    for (const file of files) {
+      const absoluteFile = path.join(outputPath, file);
+      const existingOwner = this.fileCollisions.get(absoluteFile);
+      if (existingOwner) {
+        console.warn(`[gen] Auto-leaf collision: ${absoluteFile} owned by ${existingOwner}, skipping`);
+        return;
+      }
+    }
+
     fs.writeFileSync(leafPath, JSON.stringify(leaf, null, 2), 'utf-8');
     
-    // Track that we created this child
+    // Track that we created this child and its files
     if (!this.createdChildren.has(parentDir)) {
       this.createdChildren.set(parentDir, new Set());
     }
     this.createdChildren.get(parentDir)!.add(moduleName);
+    for (const file of files) {
+      this.fileCollisions.set(path.join(outputPath, file), moduleName);
+    }
     
     console.log(`[gen] Auto-created missing leaf: ${leafPath} -> ${outputPath}/${moduleName}.ts`);
   }
@@ -616,6 +629,13 @@ Export all public interfaces and functions as described.`;
     // Validate name (no path traversal)
     if (name.includes('/') || name.includes('..')) {
       return { success: false, error: 'Invalid node name' };
+    }
+
+    // Check if content actually has nested module blocks - if not, reject gen_node
+    const nestedModules = extractTopLevelModules(content);
+    if (nestedModules.length === 0) {
+      console.warn(`[gen] Rejecting gen_node for '${name}' - no nested modules found, should be gen_leaf`);
+      return { success: false, error: `Module '${name}' has no nested submodule {} blocks. You MUST use gen_leaf instead of gen_node. gen_node is ONLY for modules that contain 2+ nested name { } blocks.` };
     }
 
     // Check for suspicious recursion patterns
