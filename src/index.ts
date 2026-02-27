@@ -5,14 +5,10 @@ import { run } from './runtime';
 import { extract } from './extract';
 import { analyse } from './analyse';
 import { browse } from './browse';
+import { createProvider, resolveApiKey } from './providers';
+import type { ProviderName } from './providers';
 
 const program = new Command();
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  console.error('Error: GEMINI_API_KEY is not set. Please set the environment variable.');
-  process.exit(1);
-}
 
 // Global options
 program
@@ -21,7 +17,20 @@ program
   .option('--max-retries <number>', 'Maximum retries for operations', '3')
   .option('--max-depth <number>', 'Maximum depth for compilation/analysis', '5')
   .option('--tokens-per-minute <number>', 'Limit token throughput to stay under provider quota')
-  .option('--requests-per-minute <number>', 'Limit request rate to stay under provider quota');
+  .option('--requests-per-minute <number>', 'Limit request rate to stay under provider quota')
+  .option('--provider <name>', 'LLM provider: gemini or anthropic', 'gemini')
+  .option('--model <name>', 'Override default model for the provider')
+  .option('--fix', 'Auto-fix issues when used with validate');
+
+/**
+ * Create the LLM provider from CLI options.
+ * Resolves API key from environment variables based on provider name.
+ */
+function getProvider(opts: Record<string, any>) {
+  const providerName = opts.provider as ProviderName;
+  const apiKey = resolveApiKey(providerName);
+  return createProvider({ provider: providerName, apiKey, model: opts.model });
+}
 
 // Compile command
 program
@@ -31,10 +40,12 @@ program
   .action(async (file) => {
     const opts = program.opts();
     const outputDir = opts.output;
+    const provider = getProvider(opts);
     console.log(`Compiling ${file} to ${outputDir}...`);
+    console.log(`Provider: ${provider.name} (${provider.model})`);
     console.log(`Max parallel: ${opts.maxParallel}, Max retries: ${opts.maxRetries}, Max depth: ${opts.maxDepth}`);
     try {
-      await compile(file, outputDir, GEMINI_API_KEY);
+      await compile(file, outputDir, provider);
       console.log('Compilation successful.');
     } catch (error) {
       console.error('Compilation failed:', error);
@@ -49,9 +60,11 @@ program
   .action(async () => {
     const opts = program.opts();
     const outputDir = opts.output;
+    const provider = getProvider(opts);
     console.log(`Running from ${outputDir}...`);
+    console.log(`Provider: ${provider.name} (${provider.model})`);
     try {
-      await run(outputDir, GEMINI_API_KEY, {
+      await run(outputDir, provider, {
         maxParallel: parseInt(opts.maxParallel),
         maxRetries: parseInt(opts.maxRetries),
         rateLimits: {
@@ -66,16 +79,31 @@ program
     }
   });
 
+// Validate command
+program
+  .command('validate')
+  .description('Validate generated code for known LLM generation bugs')
+  .action(async () => {
+    const opts = program.opts();
+    const outputDir = opts.output;
+    console.log(`Validating generated code in ${outputDir}/src/...`);
+    // TODO: implement validate module
+    console.log('Validate command not yet implemented.');
+  });
+
 // Extract command
 program
   .command('extract <path>')
   .description('Analyze existing code and generate .aid files from it')
   .option('--out <file>', 'Output .aid file', 'root.aid')
   .action(async (targetPath, cmdOpts) => {
+    const opts = program.opts();
     const outputFile = cmdOpts.out;
+    const provider = getProvider(opts);
     console.log(`Extracting from ${targetPath} to ${outputFile}...`);
+    console.log(`Provider: ${provider.name} (${provider.model})`);
     try {
-      await extract(targetPath, outputFile, GEMINI_API_KEY);
+      await extract(targetPath, outputFile, provider);
       console.log(`Extraction complete. Generated ${outputFile}`);
     } catch (error) {
       console.error('Extraction failed:', error);
@@ -90,7 +118,7 @@ program
   .action(async () => {
     const opts = program.opts();
     try {
-      await analyse({ output: opts.output, apiKey: GEMINI_API_KEY });
+      await analyse({ output: opts.output, apiKey: '' });
     } catch (error) {
       console.error('Analysis failed:', error);
       process.exit(1);
@@ -104,7 +132,7 @@ program
   .action(async () => {
     const opts = program.opts();
     try {
-      await browse({ output: opts.output, apiKey: GEMINI_API_KEY });
+      await browse({ output: opts.output, apiKey: '' });
     } catch (error) {
       console.error('Browse failed:', error);
       process.exit(1);

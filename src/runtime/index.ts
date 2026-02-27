@@ -8,15 +8,15 @@
  * 4. Logs all operations
  */
 
-import { GoogleGenAI, Type } from '@google/genai';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
 import { DEFAULT_COMMAND_WHITELIST } from '../types';
 import type { GenLeaf, LogEntry } from '../types';
+import type { LLMProvider, ToolDefinition, Message } from '../providers/types';
 
 export class AidRuntime {
-  private ai: GoogleGenAI | null = null;
+  private provider: LLMProvider | null = null;
   private logPath: string;
   private commandWhitelist: string[];
   private outputDir: string;
@@ -24,10 +24,8 @@ export class AidRuntime {
   private maxRetries: number;
   private rateLimitStats = { totalRequests: 0, total429s: 0, totalWaitMs: 0 };
 
-  constructor(apiKey?: string, outputDir?: string, additionalCommands: string[] = [], config?: RuntimeConfig) {
-    if (apiKey) {
-      this.ai = new GoogleGenAI({ apiKey });
-    }
+  constructor(provider?: LLMProvider, outputDir?: string, additionalCommands: string[] = [], config?: RuntimeConfig) {
+    this.provider = provider || null;
     this.outputDir = outputDir || process.cwd();
     this.logPath = path.join(this.outputDir, 'runtime.log.jsonl');
     this.commandWhitelist = [...DEFAULT_COMMAND_WHITELIST, ...additionalCommands];
@@ -221,30 +219,24 @@ export class AidRuntime {
    * Generate files using LLM
    */
   private async generateFiles(leaf: GenLeaf, outputDir: string): Promise<void> {
-    if (!this.ai) {
-      console.warn('[runtime] No API key - cannot generate files');
+    if (!this.provider) {
+      console.warn('[runtime] No LLM provider - cannot generate files');
       return;
     }
 
-    const tools = [
+    const tools: ToolDefinition[] = [
       {
         name: 'write_file',
         description: 'Write content to a file',
         parameters: {
-          type: Type.OBJECT,
+          type: 'object',
           properties: {
-            path: { 
-              type: Type.STRING, 
-              description: 'File path (relative to leaf directory)' 
-            },
-            content: { 
-              type: Type.STRING, 
-              description: 'Complete file content' 
-            }
+            path: { type: 'string', description: 'File path (relative to leaf directory)' },
+            content: { type: 'string', description: 'Complete file content' },
           },
-          required: ['path', 'content']
-        }
-      }
+          required: ['path', 'content'],
+        },
+      },
     ];
 
     const systemPrompt = `You are generating code files.
@@ -255,57 +247,29 @@ Use the write_file tool for each file. Create complete, working code.
 The write_file tool's "path" parameter should be JUST the filename (e.g., "index.ts", NOT "src/index.ts").
 
 CRITICAL: DO NOT DIVERGE FROM THE PROMPT INSTRUCTIONS.
-- If the prompt says to use "@google/genai", use EXACTLY "@google/genai", not "@google/generative-ai"
-- If the prompt says to use "GoogleGenAI", use EXACTLY "GoogleGenAI", not "GoogleGenerativeAI"
-- If the prompt shows specific API patterns, use those EXACT patterns
-- If the prompt shows interface definitions, implement them EXACTLY as shown
+- If the prompt specifies exact package names, API patterns, function signatures, use them EXACTLY as written
 - Do not substitute similar-sounding packages, classes, or method names
-- NEVER use GoogleGenerativeAI - the correct class name is GoogleGenAI
+- Follow all instructions to the letter
 
 IMPORTANT STRING SYNTAX RULES:
 - Use normal single quotes (') and double quotes (") in your code
 - NEVER escape quotes with backslash like \\' or \\" - this creates invalid JavaScript
-- Example: import foo from 'bar' is correct, import foo from \\'bar\\' is WRONG
-- Only escape quotes INSIDE strings when needed, not in import statements or normal code
 
 ## CRITICAL TypeScript Syntax Rules
 
-When writing TypeScript/JavaScript code, you MUST follow these rules:
-
-1. **Multi-line strings**: NEVER use single quotes (') or double quotes (") for strings that span multiple lines. 
-   Use template literals (backticks \`) instead.
-   
-   WRONG (will cause syntax errors):
-   console.log('line 1
-   line 2');
-   
-   CORRECT:
-   console.log(\`line 1
-   line 2\`);
-
-2. **String escaping**: If you need literal backticks inside a template literal, escape them with backslash.
-
-3. **Import syntax**: Use 'import type' for type-only imports when using verbatimModuleSyntax.
-
-4. **Bun APIs**: Use Bun.file() for file operations, Bun.spawn() for processes.
-
-5. **DO NOT redeclare imports**: If you import something, don't also declare a stub for it.
-   WRONG: import { Foo } from './foo'; export class Foo { }  // Conflict!
-   CORRECT: import { Foo } from './foo'; // Just use Foo, don't redeclare
-
-6. **Apostrophes in strings**: Use escaped apostrophe or double quotes for strings containing apostrophes.
-   WRONG: 'node's content'  // Syntax error
-   CORRECT: "node's content" or 'node\\'s content' or \`node's content\``;
+1. **Multi-line strings**: Use template literals (backticks) for multi-line strings, NEVER single/double quotes.
+2. **Import syntax**: Use 'import type' for type-only imports when using verbatimModuleSyntax.
+3. **DO NOT redeclare imports**: If you import something, don't also declare a stub for it.
+4. **NO ambient declarations**: Every export must have an implementation body, not just a type signature.
+5. **Async functions**: If a function uses await or returns Promise, declare it with async.`;
 
     try {
-      // CORRECT API PATTERN: use models.generateContent with conversation history
-      const history: Array<{role: 'user' | 'model' | 'function', parts: Array<any>}> = [];
+      // Build conversation using provider-agnostic Message format
+      const messages: Message[] = [
+        { role: 'user', text: leaf.prompt },
+      ];
 
-      // Initial user message with system prompt as preamble
-      const fullPrompt = `${systemPrompt}\n\n---\n\n${leaf.prompt}`;
-      history.push({ role: 'user', parts: [{ text: fullPrompt }] });
-
-      let response = await this.callWithRetry(history, tools);
+      let response = await this.callWithRetry(messages, tools, systemPrompt);
 
       // Track which files we've written
       const writtenFiles = new Set<string>();
@@ -325,23 +289,20 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
           
           // LLM returned text instead of function calls - prompt it again
           if (response.text) {
-            history.push({ role: 'model', parts: [{ text: response.text }] });
+            messages.push({ role: 'assistant', text: response.text });
           }
           
           const nudge = `You MUST use the write_file tool to create these files: ${missingFiles.join(', ')}. Please call write_file now.`;
-          history.push({ role: 'user', parts: [{ text: nudge }] });
+          messages.push({ role: 'user', text: nudge });
           
-          response = await this.callWithRetry(history, tools);
+          response = await this.callWithRetry(messages, tools, systemPrompt);
           continue;
         }
 
-        // Add model response to history
-        history.push({
-          role: 'model',
-          parts: functionCalls.map(fc => ({ functionCall: { name: fc.name, args: fc.args } }))
-        });
+        // Add model response to conversation
+        messages.push({ role: 'assistant', functionCalls });
 
-        const functionResponses: Array<{functionResponse: {name: string, response: any}}> = [];
+        const functionResponses: Array<{callId?: string, name: string, response: Record<string, unknown>}> = [];
 
         for (const call of functionCalls) {
           if (call.name === 'write_file') {
@@ -351,7 +312,7 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
             // Security: validate path
             if (!filePath || filePath.includes('..') || path.isAbsolute(filePath)) {
               functionResponses.push({
-                functionResponse: { name: call.name, response: { error: 'Invalid path' } }
+                callId: call.id, name: call.name, response: { error: 'Invalid path' },
               });
               continue;
             }
@@ -359,7 +320,6 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
             // Check if file is in allowed list
             if (!leaf.files.includes(filePath)) {
               console.warn(`[runtime] File not in allowed list: ${filePath}`);
-              // Allow it anyway but warn
             }
 
             const absolutePath = path.join(outputDir, filePath);
@@ -384,7 +344,7 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
             });
 
             functionResponses.push({
-              functionResponse: { name: call.name, response: { success: true, path: filePath } }
+              callId: call.id, name: call.name, response: { success: true, path: filePath },
             });
           }
         }
@@ -393,11 +353,11 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
           break;
         }
 
-        // Add function responses to history
-        history.push({ role: 'function', parts: functionResponses });
+        // Add function responses to conversation
+        messages.push({ role: 'tool_result', functionResponses });
 
         // Continue conversation
-        response = await this.callWithRetry(history, tools);
+        response = await this.callWithRetry(messages, tools, systemPrompt);
       }
 
       // Check if all required files were written
@@ -431,23 +391,22 @@ When writing TypeScript/JavaScript code, you MUST follow these rules:
   /**
    * Call LLM with automatic 429 retry and backoff
    */
-  private async callWithRetry(history: Array<any>, tools: any[]): Promise<any> {
+  private async callWithRetry(messages: Message[], tools: ToolDefinition[], systemPrompt: string): Promise<{ text?: string; functionCalls: Array<{id?: string; name: string; args: Record<string, unknown>}> }> {
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
         this.rateLimitStats.totalRequests++;
-        return await this.ai!.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: history,
-          config: {
-            temperature: 0,
-            tools: [{ functionDeclarations: tools }]
-          }
+        return await this.provider!.generate({
+          messages,
+          tools,
+          temperature: 0,
+          systemPrompt,
         });
       } catch (err: any) {
-        if (err?.status === 429 && attempt < this.maxRetries - 1) {
+        const status = err?.status || err?.error?.status;
+        if (status === 429 && attempt < this.maxRetries - 1) {
           this.rateLimitStats.total429s++;
           const retryMatch = String(err).match(/retry.*?(\d+(?:\.\d+)?)s/i);
-          const waitSec = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) + 5 : 45;
+          const waitSec = retryMatch ? Math.ceil(parseFloat(retryMatch[1]!)) + 5 : 45;
           const waitMs = waitSec * 1000;
           this.rateLimitStats.totalWaitMs += waitMs;
           console.log(`[runtime] Rate limited, waiting ${waitSec}s (attempt ${attempt + 1}/${this.maxRetries})...`);
@@ -515,7 +474,7 @@ export interface RuntimeConfig {
   };
 }
 
-export async function run(outputDir: string, apiKey: string, config?: RuntimeConfig): Promise<void> {
+export async function run(outputDir: string, provider: LLMProvider, config?: RuntimeConfig): Promise<void> {
   if (config?.rateLimits?.tokensPerMinute || config?.rateLimits?.requestsPerMinute) {
     console.log('[runtime] Rate limits configured:', {
       tokensPerMinute: config.rateLimits.tokensPerMinute ?? 'unlimited',
@@ -529,7 +488,7 @@ export async function run(outputDir: string, apiKey: string, config?: RuntimeCon
     console.log(`[runtime] Max retries: ${config.maxRetries}`);
   }
 
-  const runtime = new AidRuntime(apiKey, outputDir, [], config);
+  const runtime = new AidRuntime(provider, outputDir, [], config);
   await runtime.run();
 }
 

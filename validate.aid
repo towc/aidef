@@ -1,0 +1,101 @@
+validate {
+  path=src;
+
+  Deterministic post-generation validator for generated TypeScript code. NO LLM involved.
+  Creates validate.ts as a single file (no subdirectory needed - this is purely pattern-matching).
+
+  This is the most critical quality gate in aidef's build pipeline.
+  Every generation cycle produces the same 5-6 bug patterns from the LLM.
+  Instead of manually patching each time, this validator catches them automatically.
+
+  The validator scans all .ts files in a target directory and reports issues at specific
+  severity levels. Some issues have auto-fixes that can be applied with --fix.
+
+  Exports:
+    - validate(targetDir: string, options?: ValidateOptions): Promise<ValidationReport>
+    - ValidateOptions: { fix?: boolean, quiet?: boolean }
+    - ValidationReport: { files: FileReport[], totalIssues: number, fixedIssues: number, criticalCount: number, highCount: number, warningCount: number }
+    - FileReport: { filePath: string, issues: ValidationIssue[] }
+    - ValidationIssue: { line: number, column: number, severity: 'critical' | 'high' | 'warning', rule: string, message: string, fix?: { oldText: string, newText: string } }
+
+  Rules to check (ordered by severity and frequency):
+
+  CRITICAL rules (code will not work):
+
+    ambient-declaration: Detects "export function name(...): ReturnType;" or "export const name: Type;" 
+      without a body (semicolon right after the return type annotation, no opening brace).
+      These are .d.ts-style ambient declarations that produce no runtime code.
+      The pattern is: export (function|const|let|var) followed by a type annotation and semicolon, with no = or opening brace.
+      Auto-fix: cannot auto-fix (needs implementation body), but reports exact line.
+
+    wrong-genai-class: Detects use of "GoogleGenerativeAI" (old class name from @google/generative-ai).
+      Should be "GoogleGenAI" from "@google/genai".
+      Auto-fix: replace "GoogleGenerativeAI" with "GoogleGenAI" and "@google/generative-ai" with "@google/genai".
+
+    wrong-genai-api: Detects use of "getGenerativeModel" or "model.startChat" patterns (old SDK API).
+      Should use genai.models.generateContent() directly.
+      Auto-fix: none (requires structural rewrite).
+
+    wrong-response-text: Detects "response.text()" (calling text as a function).
+      In @google/genai, response.text is a property, not a method.
+      Auto-fix: replace "response.text()" with "response.text".
+
+    wrong-function-calls-access: Detects "response.candidates" access pattern for getting function calls.
+      Should use "response.functionCalls" directly.
+      Auto-fix: none (varied patterns too complex).
+
+  HIGH rules (code likely broken):
+
+    double-escaped-regex: Detects double-escaped sequences in regex literals and string arguments to
+      split/replace/match. Patterns like /\\n/ or .split("\\n") where the intent is a literal newline
+      or whitespace character. Checks for \\n, \\t, \\s, \\d, \\w, \\b, \\S, \\D, \\W, \\B in regex.
+      Auto-fix: replace double backslash with single backslash in regex/string contexts.
+
+    import-redeclaration: Detects when a file imports a symbol AND declares it locally.
+      For example: import { Foo } from './foo'; ... export interface Foo { }.
+      The local declaration shadows/conflicts with the import.
+      Auto-fix: remove the local declaration (keep the import).
+
+    missing-async: Detects functions that return Promise but lack the async keyword.
+      Pattern: "function name(...): Promise" without "async" before "function".
+      Auto-fix: add "async" before "function".
+
+    bun-write-append: Detects "Bun.write(path, content, { append: true })" which does not exist.
+      Should use fs.appendFileSync().
+      Auto-fix: none (requires import changes).
+
+    bun-mkdir: Detects "Bun.mkdir" which does not exist.
+      Should use fs.mkdirSync(path, { recursive: true }) or fs.mkdir from node:fs/promises.
+      Auto-fix: none (requires import changes).
+
+    bun-file-write: Detects "Bun.file(path).write(content)" which does not exist.
+      Should use "Bun.write(path, content)".
+      Auto-fix: none (varied patterns).
+
+  WARNING rules (potential issues):
+
+    commander-option-format: Detects commander option strings with long flag before short flag
+      like "--output, -o" instead of the correct "-o, --output".
+      Auto-fix: swap the flags.
+
+    missing-main-call: In files that appear to be CLI entry points (import commander, define commands),
+      checks that program.parse or program.parseAsync is called at module level.
+      Auto-fix: none.
+
+    response-candidates-text: Detects "response.candidates?.[0]?.content?.parts?.[0]?.text" pattern.
+      Should use "response.text" directly.
+      Auto-fix: none (varied patterns).
+
+  Implementation approach:
+    1. Recursively find all .ts files in targetDir (skip node_modules, .git)
+    2. For each file, read content and run all rules
+    3. Each rule is a function: (content: string, filePath: string) => ValidationIssue[]
+    4. Rules use regex matching on the source text - no AST parsing needed
+    5. Line numbers are calculated from the match position
+    6. If fix mode is enabled, apply auto-fixes in reverse order (bottom-up) to preserve line numbers
+    7. Write fixed content back to the file
+    8. Print a summary: files scanned, issues found by severity, issues auto-fixed
+
+  The validate function returns the report AND prints a human-readable summary to console.
+  Exit behavior: the CLI should exit with code 1 if any critical issues remain unfixed.
+}

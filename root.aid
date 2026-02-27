@@ -20,6 +20,8 @@ include runtime.aid;
 
 include extract.aid;
 
+include validate.aid;
+
 cli {
   path=src;
   
@@ -29,6 +31,7 @@ cli {
   - { compile } from './compiler' - signature: compile(rootFile: string, outputDir: string, apiKey: string): Promise<void>
   - { run } from './runtime' - signature: run(outputDir: string, apiKey: string): Promise<void>
   - { extract } from './extract' - signature: extract(targetPath: string, outputFile: string, apiKey: string): Promise<void>
+  - { validate } from './validate' - signature: validate(targetDir: string, options?: ValidateOptions): Promise<ValidationReport>
   - Gets GEMINI_API_KEY from process.env.GEMINI_API_KEY
   
   IMPORTANT: Call compile, run, and extract with POSITIONAL ARGUMENTS, not an options object.
@@ -38,6 +41,7 @@ cli {
   Commands:
     compile [file] - compiles the given .aid file (default: root.aid) to the output directory
     run - executes a previously compiled plan from the output directory
+    validate - validates generated code in the output directory, checking for known LLM generation bugs
     extract <path> - analyzes existing code at path and generates a root.aid file from it
     analyse {
       looks at the compiled plan, the ai call logs from the compilation (and runtime if already executed), and analyses it to determine the flow of instructions via parseable .gen.aid.map files, similar to javascript source maps, indicating what line of code in the corresponding .aid file came from which line of code of which other file;
@@ -54,6 +58,7 @@ cli {
     --max-depth for compilation tree (default: 5)
     --tokens-per-minute limits token throughput to stay under provider quota (default: none, no throttling)
     --requests-per-minute limits request rate to stay under provider quota (default: none, no throttling)
+    --fix when used with validate, automatically fix issues that have safe auto-fixes
   
   CRITICAL: Options are GLOBAL, not per-command. Inside action callbacks, use program.opts() to access them:
     const opts = program.opts();

@@ -10,10 +10,10 @@
  * - Tree diffing skips unchanged branches
  */
 
-import { GoogleGenAI, Type } from '@google/genai';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { GenNodeArgs, GenLeafArgs, GenLeaf } from '../types';
+import type { GenNodeArgs, GenLeafArgs, GenLeaf } from '../types';
+import type { LLMProvider, ToolDefinition, Message } from '../providers/types';
 import { TreeDiffer } from './diff';
 
 /** System prompt explaining how to process .aid specs */
@@ -266,16 +266,13 @@ function extractTopLevelModules(content: string): string[] {
 }
 
 export class GenCompiler {
-  private ai: GoogleGenAI;
+  private provider: LLMProvider;
   private differ: TreeDiffer;
   private fileCollisions: Map<string, string> = new Map(); // file -> leaf that owns it
   private createdChildren: Map<string, Set<string>> = new Map(); // parentDir -> set of child names
 
-  constructor(apiKey: string) {
-    if (!apiKey) {
-      throw new Error('GEMINI_API_KEY required for GenCompiler');
-    }
-    this.ai = new GoogleGenAI({ apiKey });
+  constructor(provider: LLMProvider) {
+    this.provider = provider;
     this.differ = new TreeDiffer();
   }
 
@@ -341,118 +338,53 @@ export class GenCompiler {
       console.log(`[gen] Expected modules: ${expectedModules.join(', ')}`);
     }
     
-    const tools = allowNodes ? [
+    // Build provider-agnostic tool definitions
+    const genLeafTool: ToolDefinition = {
+      name: 'gen_leaf',
+      description: allowNodes 
+        ? 'Create a leaf for code generation. Use for modules without nested submodule {} blocks.'
+        : 'Create a leaf node for actual code generation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Exact name from the module { } block in the spec' },
+          outputPath: { type: 'string', description: 'Output path inherited from parent path= param (e.g., "src/compiler"). Do NOT add subdirectories.' },
+          sourceAid: { type: 'string', description: 'Path to the original human .aid file (e.g., "compiler.aid")' },
+          prompt: { type: 'string', description: 'DETAILED code generation instructions: runtime (Bun/TS), dependencies, exports, types, behavior' },
+          files: { type: 'array', items: { type: 'string' }, description: 'Files to create (e.g., ["index.ts", "types.ts"])' },
+          commands: { type: 'array', items: { type: 'string' }, description: 'Shell commands to run (bun init, bun add, bun install only)' },
+        },
+        required: ['name', 'outputPath', 'sourceAid', 'prompt', 'files'],
+      },
+    };
+
+    const tools: ToolDefinition[] = allowNodes ? [
       {
         name: 'gen_node',
         description: 'Create a child node ONLY when a module has 2+ named submodule {} blocks inside it.',
         parameters: {
-          type: Type.OBJECT,
+          type: 'object',
           properties: {
-            name: { 
-              type: Type.STRING, 
-              description: 'Exact name from the module { } block in the spec' 
-            },
-            content: { 
-              type: Type.STRING, 
-              description: 'The FULL content inside that module { } block, including all nested submodules' 
-            }
+            name: { type: 'string', description: 'Exact name from the module { } block in the spec' },
+            content: { type: 'string', description: 'The FULL content inside that module { } block, including all nested submodules' },
           },
-          required: ['name', 'content']
-        }
+          required: ['name', 'content'],
+        },
       },
-      {
-        name: 'gen_leaf',
-        description: 'Create a leaf for code generation. Use for modules without nested submodule {} blocks.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            name: { 
-              type: Type.STRING, 
-              description: 'Exact name from the module { } block in the spec' 
-            },
-            outputPath: {
-              type: Type.STRING,
-              description: 'Output path inherited from parent path= param (e.g., "src/compiler"). Do NOT add subdirectories. All siblings use the same outputPath.'
-            },
-            sourceAid: {
-              type: Type.STRING,
-              description: 'Path to the original human .aid file (e.g., "compiler.aid")'
-            },
-            prompt: { 
-              type: Type.STRING, 
-              description: 'DETAILED code generation instructions: runtime (Bun/TS), dependencies, exports, types, behavior' 
-            },
-            files: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: 'Files to create (e.g., ["index.ts", "types.ts"])'
-            },
-            commands: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: 'Shell commands to run (bun init, bun add, bun install only)'
-            }
-          },
-          required: ['name', 'outputPath', 'sourceAid', 'prompt', 'files']
-        }
-      }
-    ] : [
-      // At max depth, only allow leaf creation
-      {
-        name: 'gen_leaf',
-        description: 'Create a leaf node for actual code generation.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            name: { 
-              type: Type.STRING, 
-              description: 'Name of the leaf (becomes folder name)' 
-            },
-            outputPath: {
-              type: Type.STRING,
-              description: 'Output path from path= param, relative to project root'
-            },
-            sourceAid: {
-              type: Type.STRING,
-              description: 'Path to the original human .aid file'
-            },
-            prompt: { 
-              type: Type.STRING, 
-              description: 'DETAILED instructions with exact types, function signatures, behavior' 
-            },
-            files: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: 'Files this leaf will create'
-            },
-            commands: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: 'Shell commands to run (bun init, bun add, bun install only)'
-            }
-          },
-          required: ['name', 'outputPath', 'sourceAid', 'prompt', 'files']
-        }
-      }
-    ];
+      genLeafTool,
+    ] : [genLeafTool];
 
     try {
-      // Use models.generateContent with conversation history for multi-turn
-      const history: Array<{role: string, parts: Array<any>}> = [];
-      
-      // Initial user message with system prompt as preamble
-      history.push({
-        role: 'user',
-        parts: [{ text: `${SYSTEM_PROMPT}\n\n---\n\nProcess this .aid specification. Create appropriate child nodes and/or leaves:\n\n${content}` }]
-      });
+      // Build conversation using provider-agnostic Message format
+      const messages: Message[] = [
+        { role: 'user', text: `Process this .aid specification. Create appropriate child nodes and/or leaves:\n\n${content}` },
+      ];
 
-      let response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: history,
-        config: { 
-          temperature: 0,
-          tools: [{ functionDeclarations: tools }]
-        }
+      let response = await this.provider.generate({
+        messages,
+        tools,
+        temperature: 0,
+        systemPrompt: SYSTEM_PROMPT,
       });
 
       // Process tool calls in a loop
@@ -480,9 +412,9 @@ export class GenCompiler {
 
           try {
             if (call.name === 'gen_node') {
-              result = await this.handleGenNode(call.args as GenNodeArgs, nodeDir, depth, content);
+              result = await this.handleGenNode(call.args as unknown as GenNodeArgs, nodeDir, depth, content);
             } else if (call.name === 'gen_leaf') {
-              result = await this.handleGenLeaf(call.args as GenLeafArgs, nodeDir);
+              result = await this.handleGenLeaf(call.args as unknown as GenLeafArgs, nodeDir);
             } else {
               result = { success: false, error: `Unknown tool: ${call.name}` };
             }
@@ -491,8 +423,14 @@ export class GenCompiler {
           }
 
           functionResponses.push({
+            callId: call.id,
             name: call.name,
-            response: result
+            response: {
+              ...result,
+              note: result.success 
+                ? 'Created successfully. Only make more calls if there are remaining top-level modules.'
+                : 'Failed - do not retry this item.',
+            },
           });
         }
 
@@ -506,36 +444,26 @@ export class GenCompiler {
           break;
         }
 
-        // Add model's function calls to history
-        history.push({
-          role: 'model',
-          parts: functionCalls.map(fc => ({ functionCall: { name: fc.name, args: fc.args } }))
+        // Add model's function calls + tool results to conversation
+        messages.push({
+          role: 'assistant',
+          functionCalls: functionCalls,
         });
-
-        // Add function responses to history
-        history.push({
-          role: 'function',
-          parts: functionResponses.map(fr => ({
-            functionResponse: {
-              name: fr.name,
-              response: {
-                ...fr.response,
-                note: fr.response.success 
-                  ? 'Created successfully. Only make more calls if there are remaining top-level modules.'
-                  : 'Failed - do not retry this item.'
-              }
-            }
-          }))
+        messages.push({
+          role: 'tool_result',
+          functionResponses: functionResponses.map(fr => ({
+            callId: fr.callId,
+            name: fr.name,
+            response: fr.response as Record<string, unknown>,
+          })),
         });
 
         // Continue the conversation
-        response = await this.ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: history,
-          config: { 
-            temperature: 0,
-            tools: [{ functionDeclarations: tools }]
-          }
+        response = await this.provider.generate({
+          messages,
+          tools,
+          temperature: 0,
+          systemPrompt: SYSTEM_PROMPT,
         });
       }
 
@@ -557,7 +485,7 @@ export class GenCompiler {
             const match = moduleRegex.exec(content);
             const moduleContent = match ? match[1] : `Implements ${moduleName} functionality`;
             
-            await this.autoCreateLeafForModule(moduleName, moduleContent, nodeDir, content);
+            await this.autoCreateLeafForModule(moduleName, moduleContent!, nodeDir, content);
             createdAny = true;
           }
         }
