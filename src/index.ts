@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { compile } from './compiler';
 import { run } from './runtime';
 import { extract } from './extract';
+import { validate } from './validate';
 import { analyse } from './analyse';
 import { browse } from './browse';
 import { createProvider, resolveApiKey } from './providers';
@@ -81,14 +82,17 @@ program
 
 // Validate command
 program
-  .command('validate')
+  .command('validate [dir]')
   .description('Validate generated code for known LLM generation bugs')
-  .action(async () => {
+  .argument('[dir]', 'Directory to validate (default: output/src)')
+  .action(async (dir) => {
     const opts = program.opts();
-    const outputDir = opts.output;
-    console.log(`Validating generated code in ${outputDir}/src/...`);
-    // TODO: implement validate module
-    console.log('Validate command not yet implemented.');
+    const targetDir = dir || `${opts.output}/src`;
+    console.log(`Validating ${targetDir}...`);
+    const report = await validate(targetDir, { fix: opts.fix });
+    if (report.criticalCount > 0 && !opts.fix) {
+      process.exit(1);
+    }
   });
 
 // Extract command
